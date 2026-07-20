@@ -15,6 +15,7 @@ See `NOTICE` and upstream `LICENSE`.
 | `bin/staka-iso-make` | Host entrypoint (Docker) |
 | `builder/build-iso.sh` | Runs inside the build container |
 | `configs/` | ISO overlay (profile, pacman, airootfs) |
+| `branding/` | Installer ASCII logo + Plymouth theme assets |
 | `archiso/` | Arch releng profile checkout (not stored in git; clone at build time) |
 
 ## STAKA_MEDIA paths

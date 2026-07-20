@@ -72,6 +72,30 @@ if [[ -d "$OMARCHY_DST/default/plymouth" ]]; then
   cp -r "$OMARCHY_DST/default/plymouth/"* "$build_cache_dir/airootfs/usr/share/plymouth/themes/omarchy/"
 fi
 
+# --- Staka branding overlay (logo + plymouth) ---
+if [[ -d /branding ]]; then
+  echo "Applying Staka branding overlay"
+  if [[ -f /branding/logo.txt ]]; then
+    cp /branding/logo.txt "$OMARCHY_DST/logo.txt"
+  fi
+  # Installer logo color: Staka blue instead of green
+  if [[ -f "$OMARCHY_DST/install/helpers/presentation.sh" ]]; then
+    sed -i 's/gum style --foreground 2/gum style --foreground "#1E5EFF"/g'       "$OMARCHY_DST/install/helpers/presentation.sh"
+  fi
+  if [[ -d /branding/plymouth ]]; then
+    mkdir -p "$build_cache_dir/airootfs/usr/share/plymouth/themes/staka"
+    # reuse upstream chrome assets when present
+    if [[ -d "$OMARCHY_DST/default/plymouth" ]]; then
+      cp -r "$OMARCHY_DST/default/plymouth/"*         "$build_cache_dir/airootfs/usr/share/plymouth/themes/staka/" || true
+    fi
+    cp -f /branding/plymouth/logo.png       "$build_cache_dir/airootfs/usr/share/plymouth/themes/staka/logo.png"
+    cp -f /branding/plymouth/staka.plymouth       "$build_cache_dir/airootfs/usr/share/plymouth/themes/staka/staka.plymouth"
+    cp -f /branding/plymouth/staka.script       "$build_cache_dir/airootfs/usr/share/plymouth/themes/staka/staka.script"
+    # drop upstream theme name files if copied
+    rm -f "$build_cache_dir/airootfs/usr/share/plymouth/themes/staka/omarchy.plymouth"       "$build_cache_dir/airootfs/usr/share/plymouth/themes/staka/omarchy.script"
+  fi
+fi
+
 # --- Node.js offline payload (cache tarball on /cache/node) ---
 NODE_DIST_URL="https://nodejs.org/dist/latest"
 NODE_SHASUMS=$(curl -fsSL "$NODE_DIST_URL/SHASUMS256.txt")

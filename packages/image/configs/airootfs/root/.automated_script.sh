@@ -46,23 +46,23 @@ install_omarchy() {
 # Set Tokyo Night color scheme for the terminal
 set_tokyo_night_colors() {
   if [[ $(tty) == "/dev/tty"* ]]; then
-    # Tokyo Night color palette
-    echo -en "\e]P01a1b26" # black (background)
+    # Staka installer palette (ink bg + brand blue)
+    echo -en "\e]P00b1220" # black (background)
     echo -en "\e]P1f7768e" # red
-    echo -en "\e]P29ece6a" # green
+    echo -en "\e]P23b7bff" # green slot -> brand blue-mid (logo uses slot 2 historically)
     echo -en "\e]P3e0af68" # yellow
-    echo -en "\e]P47aa2f7" # blue
-    echo -en "\e]P5bb9af7" # magenta
+    echo -en "\e]P41e5eff" # blue
+    echo -en "\e]P53b7bff" # magenta -> brand blue-mid
     echo -en "\e]P67dcfff" # cyan
-    echo -en "\e]P7a9b1d6" # white
+    echo -en "\e]P7e8eef9" # white
     echo -en "\e]P8414868" # bright black
     echo -en "\e]P9f7768e" # bright red
-    echo -en "\e]PA9ece6a" # bright green
+    echo -en "\e]PA3b7bff" # bright green slot
     echo -en "\e]PBe0af68" # bright yellow
-    echo -en "\e]PC7aa2f7" # bright blue
-    echo -en "\e]PDbb9af7" # bright magenta
+    echo -en "\e]PC1e5eff" # bright blue
+    echo -en "\e]PD3b7bff" # bright magenta
     echo -en "\e]PE7dcfff" # bright cyan
-    echo -en "\e]PFc0caf5" # bright white (foreground)
+    echo -en "\e]PFe8eef9" # bright white (foreground)
 
     # Set default foreground and background
     echo -en "\033[0m"

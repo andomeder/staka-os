@@ -79,6 +79,7 @@ DOCKER_ARGS=(
   -v "$BUILD_ROOT/archiso:/archiso:ro"
   -v "$BUILD_ROOT/builder:/builder:ro"
   -v "$BUILD_ROOT/configs:/configs:ro"
+  -v "$BUILD_ROOT/branding:/branding:ro"
   -v "$MEDIA_BUILD/pacman-pkg:/var/cache/pacman/pkg"
 )
 
