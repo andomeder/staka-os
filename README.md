@@ -1,5 +1,5 @@
 <p align="left">
-  <img src="brands/staka-wordmark.svg" alt="Staka" height="48" />
+  <img src="brands/staka-mark.svg" alt="" height="40" />
 </p>
 
 # Staka
@@ -34,9 +34,9 @@ Both a loaded session and a reduced session created a 1920x1080@60 headless outp
 |---|---|
 | `brands/staka-mark.svg` | stacked S, color |
 | `brands/staka-mark-mono.svg` | stacked S, `currentColor` |
-| `brands/staka-wordmark.svg` | mark + “staka” |
+| `brands/staka-wordmark.svg` | mark + "staka" (theme-aware text) |
 
-Accent blue: `#1E5EFF` / `#3B7BFF` / `#0B2F8A` on ink `#0B1220`.
+Accent blue: `#1E5EFF` / `#3B7BFF` / `#0B2F8A`. Ink `#0B1220`, light text `#E8EEF9`.
 
 ## License
 

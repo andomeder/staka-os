@@ -1,4 +1,4 @@
-# Headless output bench — 2026-07-20
+# Headless output bench - 2026-07-20
 
 ## Machine
 
@@ -17,7 +17,7 @@
 - Headless mode requested: 1920x1080@60
 - Workspace id: 77
 
-## Run A — loaded session
+## Run A - loaded session
 
 - Timestamp (UTC): 20260720T095557Z
 - Headless: HEADLESS-2 1920x1080 @ 60 Hz
@@ -30,7 +30,7 @@
 - teardown: headless removed; eDP-1 only
 - JSON: `loaded.json`
 
-## Run B — reduced session
+## Run B - reduced session
 
 - Timestamp (UTC): 20260720T095917Z
 - Headless: HEADLESS-3 1920x1080 @ 60 Hz
