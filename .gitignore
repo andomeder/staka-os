@@ -1,0 +1,35 @@
+# Local bench output (re-runs)
+test/laptop-bench/results/
+
+# Build / deps (future)
+target/
+node_modules/
+dist/
+build/
+.out/
+.next/
+.bun/
+.cargo/
+.venv/
+__pycache__/
+*.pyc
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+.idea/
+.vscode/
+*.code-workspace
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Logs / temp
+*.log
+tmp/
+.cache/
