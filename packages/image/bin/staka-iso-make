@@ -106,15 +106,22 @@ echo "installer: $OMARCHY_INSTALLER_REPO@$OMARCHY_INSTALLER_REF mirror=$OMARCHY_
 
 docker run "${DOCKER_ARGS[@]}" archlinux/archlinux:latest "/$BUILD_SCRIPT"
 
+# Prefer the newest ISO that is not under previous/
 latest_iso=$(\ls -t "$MEDIA_IMAGES"/*.iso 2>/dev/null | head -n1 || true)
 if [[ -z "$latest_iso" ]]; then
   echo "No ISO produced in $MEDIA_IMAGES"
   exit 1
 fi
 
-iso_ref="${latest_iso%.*}-${OMARCHY_INSTALLER_REF}.iso"
-if [[ "$latest_iso" != "$iso_ref" ]]; then
-  mv -f "$latest_iso" "$iso_ref"
+base="$(basename "$latest_iso")"
+# Append installer ref once (avoid staka-...-master-master.iso)
+if [[ "$base" == *"-${OMARCHY_INSTALLER_REF}.iso" ]]; then
+  iso_ref="$latest_iso"
+else
+  iso_ref="${latest_iso%.*}-${OMARCHY_INSTALLER_REF}.iso"
+  if [[ "$latest_iso" != "$iso_ref" ]]; then
+    mv -f "$latest_iso" "$iso_ref"
+  fi
 fi
 sha256sum "$iso_ref" | tee "$iso_ref.sha256"
 echo "Built: $iso_ref"
