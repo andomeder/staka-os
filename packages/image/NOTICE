@@ -1,0 +1,22 @@
+Staka image build
+Copyright 2026 William Nyarangi Obino Kengere
+
+This tree includes software developed in:
+
+  omarchy-iso
+  Copyright (c) Anton Hvornum
+  https://github.com/omacom-io/omarchy-iso
+  MIT License
+
+Installer payloads fetched at build time may include:
+
+  Omarchy
+  Copyright (c) David Heinemeier Hansson / Basecamp
+  https://github.com/basecamp/omarchy
+  MIT License
+
+Archiso releng profile:
+
+  archiso
+  Copyright (c) Arch Linux contributors
+  https://gitlab.archlinux.org/archlinux/archiso

@@ -14,7 +14,9 @@ Status: early. Implementation is starting from measured compositor baselines.
 
 ```text
 brands/                 logo mark and wordmark
+packages/image/         ISO build (omarchy-iso fork)
 test/laptop-bench/      headless-output measurement harness
+test/qemu/              QEMU boot helpers
 test/artifacts/         dated bench snapshots
 ```
 

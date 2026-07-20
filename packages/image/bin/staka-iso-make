@@ -1,0 +1,120 @@
+#!/bin/bash
+# Build the Staka ISO via Docker + mkarchiso (forked from omarchy-iso).
+# Heavy work (package cache, mkarchiso workdir, ISO output, downloads) stays on STAKA_MEDIA.
+set -euo pipefail
+
+NO_CACHE=""
+while [[ $# -gt 0 ]]; do
+  case $1 in
+  --no-cache)
+    NO_CACHE=1
+    shift
+    ;;
+  --local-source)
+    LOCAL_SOURCE=1
+    OMARCHY_MIRROR=edge
+    shift
+    ;;
+  --dev)
+    OMARCHY_INSTALLER_REF=dev
+    OMARCHY_MIRROR=edge
+    shift
+    ;;
+  *)
+    echo "Unknown option: $1"
+    echo "Usage: $0 [--no-cache] [--local-source] [--dev]"
+    exit 1
+    ;;
+  esac
+done
+
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+BUILD_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
+
+if [[ -d /mnt/staka-media/build ]]; then
+  MEDIA_BUILD=/mnt/staka-media/build
+  MEDIA_IMAGES=/mnt/staka-media/images
+elif [[ -n "${STAKA_MEDIA:-}" && -d "${STAKA_MEDIA}/build" ]]; then
+  MEDIA_BUILD="${STAKA_MEDIA}/build"
+  MEDIA_IMAGES="${STAKA_MEDIA}/images"
+else
+  echo "WARN: STAKA_MEDIA not mounted at /mnt/staka-media; using $BUILD_ROOT/{release,cache}"
+  MEDIA_BUILD="$BUILD_ROOT"
+  MEDIA_IMAGES="$BUILD_ROOT/release"
+fi
+
+mkdir -p \
+  "$MEDIA_BUILD/container-cache" \
+  "$MEDIA_BUILD/pacman-pkg" \
+  "$MEDIA_BUILD/offline-cache" \
+  "$MEDIA_BUILD/dl-cache/node" \
+  "$MEDIA_BUILD/dl-cache/omarchy" \
+  "$MEDIA_IMAGES"
+
+if [[ ! -d "$BUILD_ROOT/archiso/configs/releng" ]]; then
+  echo "archiso missing under $BUILD_ROOT/archiso"
+  echo "Clone: git clone --depth 1 -b master https://gitlab.archlinux.org/archlinux/archiso.git \"$BUILD_ROOT/archiso\""
+  exit 1
+fi
+
+OMARCHY_INSTALLER_REPO="${OMARCHY_INSTALLER_REPO:-basecamp/omarchy}"
+OMARCHY_INSTALLER_REF="${OMARCHY_INSTALLER_REF:-master}"
+OMARCHY_MIRROR="${OMARCHY_MIRROR:-stable}"
+
+BUILD_SCRIPT="builder/build-iso.sh"
+
+DOCKER_ARGS=(
+  --rm
+  --privileged
+  -e "OMARCHY_INSTALLER_REPO=$OMARCHY_INSTALLER_REPO"
+  -e "OMARCHY_INSTALLER_REF=$OMARCHY_INSTALLER_REF"
+  -e "OMARCHY_MIRROR=$OMARCHY_MIRROR"
+  -e "HOST_UID=$(id -u)"
+  -e "HOST_GID=$(id -g)"
+  -e "STAKA_ISO_NAME=${STAKA_ISO_NAME:-staka}"
+  -v "$MEDIA_IMAGES/:/out/"
+  -v "$MEDIA_BUILD/container-cache:/var/cache"
+  -v "$MEDIA_BUILD/dl-cache:/cache"
+  -v "$BUILD_ROOT/$BUILD_SCRIPT:/$BUILD_SCRIPT:ro"
+  -v "$BUILD_ROOT/archiso:/archiso:ro"
+  -v "$BUILD_ROOT/builder:/builder:ro"
+  -v "$BUILD_ROOT/configs:/configs:ro"
+  -v "$MEDIA_BUILD/pacman-pkg:/var/cache/pacman/pkg"
+)
+
+if [[ -n "${LOCAL_SOURCE-}" ]]; then
+  if [[ -z "${OMARCHY_PATH:-}" || ! -d "${OMARCHY_PATH}" ]]; then
+    echo "LOCAL_SOURCE requires OMARCHY_PATH to a local omarchy checkout"
+    exit 1
+  fi
+  DOCKER_ARGS+=(-v "$OMARCHY_PATH:/omarchy:ro")
+fi
+
+if [[ -z "$NO_CACHE" ]]; then
+  OFFLINE_REPO_BUILD_CACHE_DIR="$MEDIA_BUILD/offline-cache/${OMARCHY_MIRROR}"
+  mkdir -p "$OFFLINE_REPO_BUILD_CACHE_DIR"
+  # Packages downloaded for the ISO offline mirror land here and are reused next build
+  DOCKER_ARGS+=(-v "$OFFLINE_REPO_BUILD_CACHE_DIR:/var/cache/airootfs/var/cache/omarchy")
+fi
+
+echo "BUILD_ROOT=$BUILD_ROOT"
+echo "ISO out: $MEDIA_IMAGES"
+echo "container /var/cache: $MEDIA_BUILD/container-cache"
+echo "dl-cache: $MEDIA_BUILD/dl-cache"
+echo "offline-cache: $MEDIA_BUILD/offline-cache/${OMARCHY_MIRROR}"
+echo "installer: $OMARCHY_INSTALLER_REPO@$OMARCHY_INSTALLER_REF mirror=$OMARCHY_MIRROR"
+
+docker run "${DOCKER_ARGS[@]}" archlinux/archlinux:latest "/$BUILD_SCRIPT"
+
+latest_iso=$(\ls -t "$MEDIA_IMAGES"/*.iso 2>/dev/null | head -n1 || true)
+if [[ -z "$latest_iso" ]]; then
+  echo "No ISO produced in $MEDIA_IMAGES"
+  exit 1
+fi
+
+iso_ref="${latest_iso%.*}-${OMARCHY_INSTALLER_REF}.iso"
+if [[ "$latest_iso" != "$iso_ref" ]]; then
+  mv -f "$latest_iso" "$iso_ref"
+fi
+sha256sum "$iso_ref" | tee "$iso_ref.sha256"
+echo "Built: $iso_ref"

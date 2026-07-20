@@ -1,0 +1,5 @@
+release/**
+vm-saves/**
+archiso/
+*.iso
+*.sha256
