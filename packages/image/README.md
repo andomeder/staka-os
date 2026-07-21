@@ -65,10 +65,14 @@ Enrollment codes are consumed at `POST /v1/activate/enroll`. If activation
 succeeds and archinstall later fails:
 
 1. Do not reuse the spent code.
-2. Admin reissues a new code for the same user (`bun run code:create` or `/admin`).
-3. Retry install. Same HWID can re-enroll while the machine is still `pending`
-   (server rebind path). If the machine is `approved` without a usable nonce,
-   admin must reset/revoke that machine row before a clean enroll.
+2. If the machine is still `pending`: admin reissues a new code for the same
+   user (`bun run code:create` or `/admin`), then retry. Same HWID rebinds on
+   enroll while `pending`.
+3. If the machine is `approved` (nonce already issued/consumed), `active`,
+   `suspended`, or `revoked`: enroll returns `409 hardware_id_bound`. Revoke
+   does not free `hardware_id`. There is no admin reset API yet - clear or
+   reopen the row in the DB (owner) before a clean enroll, or use a different
+   machine/HWID.
 
 Bare metal needs readable DMI (`/sys/class/dmi/id/*`). Synthetic HWID from
 `/etc/machine-id` is only for QEMU/host smoke when DMI is unavailable; prefer

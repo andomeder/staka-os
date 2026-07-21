@@ -83,7 +83,8 @@ catch_errors() {
   show_failed_script_or_command
   echo
   gum style "If activation already succeeded, the enrollment code was consumed."
-  gum style "Ask your admin to reissue a code or reset this machine before retrying."
+  gum style "While pending: admin reissues a code for the same user, then retry."
+  gum style "If approved/active/revoked: HWID stays bound; revoke does not free it."
   gum style "Log: ${OMARCHY_INSTALL_LOG_FILE:-/var/log/omarchy-install.log}"
 
   # Offer options menu
