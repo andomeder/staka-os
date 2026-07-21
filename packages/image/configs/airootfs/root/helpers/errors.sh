@@ -1,18 +1,4 @@
-# Directs user to Omarchy Discord
-QR_CODE='
-█▀▀▀▀▀█ ▄ ▄ ▀▄▄▄█ █▀▀▀▀▀█
-█ ███ █ ▄▄▄▄▀▄▀▄▀ █ ███ █
-█ ▀▀▀ █ ▄█  ▄█▄▄▀ █ ▀▀▀ █
-▀▀▀▀▀▀▀ ▀▄█ █ █ █ ▀▀▀▀▀▀▀
-▀▀█▀▀▄▀▀▀▀▄█▀▀█  ▀ █ ▀ █
-█▄█ ▄▄▀▄▄ ▀ ▄ ▀█▄▄▄▄ ▀ ▀█
-▄ ▄▀█ ▀▄▀▀▀▄ ▄█▀▄█▀▄▀▄▀█▀
-█ ▄▄█▄▀▄█ ▄▄▄  ▀ ▄▀██▀ ▀█
-▀ ▀   ▀ █ ▀▄  ▀▀█▀▀▀█▄▀
-█▀▀▀▀▀█ ▀█  ▄▀▀ █ ▀ █▄▀██
-█ ███ █ █▀▄▄▀ █▀███▀█▄██▄
-█ ▀▀▀ █ ██  ▀ █▄█ ▄▄▄█▀ █
-▀▀▀▀▀▀▀ ▀ ▀ ▀▀▀  ▀ ▀▀▀▀▀▀'
+# Support contact for failed installs (no external community QR).
 
 # Track if we're already handling an error to prevent double-trapping
 ERROR_HANDLING=false
@@ -95,45 +81,24 @@ catch_errors() {
 
   gum style "This command halted with exit code $exit_code:"
   show_failed_script_or_command
-
-  gum style "$QR_CODE"
   echo
-  gum style "Get help from the community via QR code or at https://discord.gg/tXFUdasqhY"
+  gum style "If activation already succeeded, the enrollment code was consumed."
+  gum style "Ask your admin to reissue a code or reset this machine before retrying."
+  gum style "Log: ${OMARCHY_INSTALL_LOG_FILE:-/var/log/omarchy-install.log}"
 
   # Offer options menu
   while true; do
-    options=()
+    options=("View full log" "Exit")
 
-    # If online install, show retry first
-    if [[ -n ${OMARCHY_ONLINE_INSTALL:-} ]]; then
-      options+=("Retry installation")
-    fi
-
-    # Add upload option if internet is available
-    if ping -c 1 -W 1 1.1.1.1 >/dev/null 2>&1; then
-      options+=("Upload log for support")
-    fi
-
-    # Add remaining options
-    options+=("View full log")
-    options+=("Exit")
-
-    choice=$(gum choose "${options[@]}" --header "What would you like to do?" --height 6 --padding "1 $PADDING_LEFT")
+    choice=$(gum choose "${options[@]}" --header "What would you like to do?" --height 4 --padding "1 $PADDING_LEFT")
 
     case "$choice" in
-    "Retry installation")
-      bash ~/.local/share/omarchy/install.sh
-      break
-      ;;
     "View full log")
       if command -v less &>/dev/null; then
         less "$OMARCHY_INSTALL_LOG_FILE"
       else
         tail "$OMARCHY_INSTALL_LOG_FILE"
       fi
-      ;;
-    "Upload log for support")
-      omarchy-upload-log
       ;;
     "Exit" | "")
       exit 1

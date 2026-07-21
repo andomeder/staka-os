@@ -14,12 +14,13 @@ Options:
   --hostname NAME            Machine hostname
   --flow admin|self          Provision flow (default: admin)
   --employee-id ID           Flow B employee id
-  --password PASS            Flow B password
   --token-out PATH           Write machine JWT here (default: ./machine.token)
   --state-out PATH           Write activation state JSON (default: ./staka-activation.json)
   --poll-interval SEC        Override poll interval from server
   --timeout SEC              Max seconds waiting for approval (default: 1800)
-  --auto-approve-wait        Keep polling until approved/active or timeout
+
+Flow B password:
+  Set STAKA_SELF_PASSWORD in the environment (never pass on argv).
 EOF
 }
 
@@ -28,7 +29,6 @@ ENROLLMENT_CODE=""
 HOSTNAME_VALUE=""
 FLOW="admin"
 EMPLOYEE_ID=""
-PASSWORD=""
 TOKEN_OUT="./machine.token"
 STATE_OUT="./staka-activation.json"
 POLL_INTERVAL=""
@@ -57,8 +57,8 @@ while [[ $# -gt 0 ]]; do
     shift 2
     ;;
   --password)
-    PASSWORD="${2:-}"
-    shift 2
+    echo "--password is not accepted; set STAKA_SELF_PASSWORD instead" >&2
+    exit 2
     ;;
   --token-out)
     TOKEN_OUT="${2:-}"
@@ -88,6 +88,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+PASSWORD="${STAKA_SELF_PASSWORD:-}"
+
 if [[ -z $ORG_URL || -z $ENROLLMENT_CODE || -z $HOSTNAME_VALUE ]]; then
   echo "org-url, code, and hostname are required" >&2
   usage >&2
@@ -100,10 +102,11 @@ if [[ $FLOW != "admin" && $FLOW != "self" ]]; then
 fi
 
 if [[ $FLOW == "self" && (-z $EMPLOYEE_ID || -z $PASSWORD) ]]; then
-  echo "flow=self requires --employee-id and --password" >&2
+  echo "flow=self requires --employee-id and STAKA_SELF_PASSWORD" >&2
   exit 2
 fi
 
+# Match @staka/protocol Hostname: 1-63 of [A-Za-z0-9-]
 if ! [[ $HOSTNAME_VALUE =~ ^[A-Za-z0-9-]{1,63}$ ]]; then
   echo "invalid hostname" >&2
   exit 2
@@ -169,6 +172,7 @@ http_json() {
   local tmp
   tmp=$(mktemp)
   local code
+  local curl_rc=0
   if [[ -n $body ]]; then
     code=$(
       curl -sS -o "$tmp" -w '%{http_code}' \
@@ -178,8 +182,8 @@ http_json() {
         --connect-timeout 10 \
         --max-time 60 \
         --data "$body" \
-        "$url" || true
-    )
+        "$url"
+    ) || curl_rc=$?
   else
     code=$(
       curl -sS -o "$tmp" -w '%{http_code}' \
@@ -187,11 +191,12 @@ http_json() {
         -H 'Accept: application/json' \
         --connect-timeout 10 \
         --max-time 60 \
-        "$url" || true
-    )
+        "$url"
+    ) || curl_rc=$?
   fi
-  HTTP_CODE="$code"
-  HTTP_BODY=$(cat "$tmp")
+  HTTP_CURL_RC=$curl_rc
+  HTTP_CODE="${code:-}"
+  HTTP_BODY=$(cat "$tmp" 2>/dev/null || true)
   rm -f "$tmp"
 }
 
@@ -204,7 +209,14 @@ if [[ $FLOW == "self" ]]; then
       --arg enrollment_code "$ENROLLMENT_CODE" \
       '{employee_id:$employee_id,password:$password,enrollment_code:$enrollment_code}'
   )
+  # Drop password from shell env after building the request body.
+  PASSWORD=""
+  unset STAKA_SELF_PASSWORD
   http_json POST "$ORG_URL/v1/activate/self/authenticate" "$auth_body"
+  if [[ ${HTTP_CURL_RC:-0} -ne 0 || -z $HTTP_CODE ]]; then
+    echo "self authenticate transport failed (curl_rc=${HTTP_CURL_RC:-?})" >&2
+    exit 1
+  fi
   if [[ $HTTP_CODE != "200" ]]; then
     echo "self authenticate failed (HTTP $HTTP_CODE): $HTTP_BODY" >&2
     exit 1
@@ -267,6 +279,10 @@ else
 fi
 
 http_json POST "$ORG_URL/v1/activate/enroll" "$enroll_body"
+if [[ ${HTTP_CURL_RC:-0} -ne 0 || -z $HTTP_CODE ]]; then
+  echo "enroll transport failed (curl_rc=${HTTP_CURL_RC:-?})" >&2
+  exit 1
+fi
 if [[ $HTTP_CODE != "202" ]]; then
   echo "enroll failed (HTTP $HTTP_CODE): $HTTP_BODY" >&2
   exit 1
@@ -283,6 +299,7 @@ if ! [[ $POLL_INTERVAL =~ ^[0-9]+$ ]] || ((POLL_INTERVAL < 1)); then
 fi
 
 echo "enrolled machine_id=$MACHINE_ID status=$STATUS poll=${POLL_INTERVAL}s"
+echo "note: enrollment code is consumed at enroll; if install fails later, admin must reissue a code or reset the machine enrollment"
 
 deadline=$((SECONDS + TIMEOUT_SEC))
 NONCE=""
@@ -292,10 +309,19 @@ while ((SECONDS < deadline)); do
     jq -nc --arg enrollment_code "$ENROLLMENT_CODE" '{enrollment_code:$enrollment_code}'
   )
   http_json POST "$ORG_URL/v1/activate/status/$MACHINE_ID" "$status_body"
-  if [[ $HTTP_CODE != "200" ]]; then
-    echo "status poll failed (HTTP $HTTP_CODE): $HTTP_BODY" >&2
+  if [[ ${HTTP_CURL_RC:-0} -ne 0 || -z $HTTP_CODE ]]; then
+    echo "status poll transport failed (curl_rc=${HTTP_CURL_RC:-?}); retrying" >&2
     sleep "$POLL_INTERVAL"
     continue
+  fi
+  if [[ $HTTP_CODE == "429" || $HTTP_CODE =~ ^5[0-9][0-9]$ ]]; then
+    echo "status poll retryable (HTTP $HTTP_CODE): $HTTP_BODY" >&2
+    sleep "$POLL_INTERVAL"
+    continue
+  fi
+  if [[ $HTTP_CODE != "200" ]]; then
+    echo "status poll failed hard (HTTP $HTTP_CODE): $HTTP_BODY" >&2
+    exit 1
   fi
   STATUS=$(printf '%s' "$HTTP_BODY" | jq -er '.status')
   NONCE=$(printf '%s' "$HTTP_BODY" | jq -r '.enrollment_nonce // empty')
@@ -316,6 +342,7 @@ done
 
 if [[ -z $NONCE ]]; then
   echo "timed out waiting for approval (last status=$STATUS)" >&2
+  echo "recovery: admin reissues enrollment code for this user; same HWID can re-enroll while pending" >&2
   exit 1
 fi
 
@@ -326,6 +353,10 @@ token_body=$(
     '{machine_id:$machine_id,enrollment_nonce:$enrollment_nonce}'
 )
 http_json POST "$ORG_URL/v1/activate/token" "$token_body"
+if [[ ${HTTP_CURL_RC:-0} -ne 0 || -z $HTTP_CODE ]]; then
+  echo "token exchange transport failed (curl_rc=${HTTP_CURL_RC:-?})" >&2
+  exit 1
+fi
 if [[ $HTTP_CODE != "200" ]]; then
   echo "token exchange failed (HTTP $HTTP_CODE): $HTTP_BODY" >&2
   exit 1

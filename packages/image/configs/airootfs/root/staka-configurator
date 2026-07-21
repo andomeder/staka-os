@@ -203,13 +203,14 @@ user_form() {
   while true; do
     hostname=$(gum input --placeholder "Letters, digits, and dashes (or return for 'staka')" --prompt.foreground="#1E5EFF" --prompt "Hostname> ")
 
-    if [[ "$hostname" =~ ^[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]]; then
+    # Match @staka/protocol Hostname so UI rejects the same shapes as the API.
+    if [[ "$hostname" =~ ^[A-Za-z0-9-]{1,63}$ ]]; then
       break
     elif [[ -z $hostname ]]; then
       hostname="staka"
       break
     else
-      notice "Hostname must be 1-63 letters, digits, or dashes, and cannot start or end with a dash" 1
+      notice "Hostname must be 1-63 letters, digits, or dashes" 1
     fi
   done
 
@@ -425,11 +426,19 @@ activate_args=(
 )
 
 if [[ $provision_flow == "self" ]]; then
-  activate_args+=(--employee-id "$employee_id" --password "$self_password")
+  activate_args+=(--employee-id "$employee_id")
+  export STAKA_SELF_PASSWORD="$self_password"
 fi
 
-if ! "$SCRIPT_DIR/staka-activate.sh" "${activate_args[@]}"; then
-  abort "Org activation failed. Check org URL, code, and network."
+set +e
+"$SCRIPT_DIR/staka-activate.sh" "${activate_args[@]}"
+activate_rc=$?
+set -e
+unset STAKA_SELF_PASSWORD
+self_password=""
+
+if ((activate_rc != 0)); then
+  abort "Org activation failed. Check org URL, code, and network. Spent codes need admin reissue."
 fi
 
 notice "Machine activated" 1

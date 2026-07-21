@@ -11,11 +11,11 @@ use_omarchy_helpers() {
 
 run_configurator() {
   set_tokyo_night_colors
-  if [[ -x ./staka-configurator ]]; then
-    ./staka-configurator
-  else
-    ./configurator
+  if [[ ! -x ./staka-configurator ]]; then
+    echo "staka-configurator missing; refusing legacy install without org activation" >&2
+    exit 1
   fi
+  ./staka-configurator
   export OMARCHY_USER="$(jq -r '.users[0].username' user_credentials.json)"
 }
 

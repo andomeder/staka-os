@@ -51,10 +51,28 @@ Caches stay on the SATA volume so repeat builds avoid re-downloading packages, N
 
 ## Activation client (live ISO)
 
-On boot, `.automated_script.sh` runs `staka-configurator`, which collects org
-URL + enrollment code + hostname (Flow B also asks for employee id + password),
+On boot, `.automated_script.sh` requires `staka-configurator` (fail-closed; no
+legacy Omarchy form). It collects org URL + enrollment code + hostname (Flow B
+also asks for employee id + password via `STAKA_SELF_PASSWORD`, never argv),
 then calls `staka-activate.sh` before archinstall. After install, the machine
 JWT is written to `/etc/staka/machine.token` on the target root.
+
+Hostname validation matches `@staka/protocol` (`^[A-Za-z0-9-]{1,63}$`).
+
+### Recovery after failed install
+
+Enrollment codes are consumed at `POST /v1/activate/enroll`. If activation
+succeeds and archinstall later fails:
+
+1. Do not reuse the spent code.
+2. Admin reissues a new code for the same user (`bun run code:create` or `/admin`).
+3. Retry install. Same HWID can re-enroll while the machine is still `pending`
+   (server rebind path). If the machine is `approved` without a usable nonce,
+   admin must reset/revoke that machine row before a clean enroll.
+
+Bare metal needs readable DMI (`/sys/class/dmi/id/*`). Synthetic HWID from
+`/etc/machine-id` is only for QEMU/host smoke when DMI is unavailable; prefer
+`STAKA_HWID_*` overrides in that case.
 
 Host-side smoke against a local org server (QEMU guest reaches host at
 `10.0.2.2`):
@@ -66,6 +84,9 @@ export STAKA_HWID_BOARD_SERIAL='QEMU-SN-1'
 export STAKA_HWID_PRODUCT_NAME='QEMU Standard PC'
 export STAKA_HWID_CPU_ID='QEMU Virtual CPU'
 
+# Flow B only:
+# export STAKA_SELF_PASSWORD='...'
+
 ./packages/image/configs/airootfs/root/staka-activate.sh \
   --org-url http://127.0.0.1:8080 \
   --code "$CODE" \
@@ -74,9 +95,16 @@ export STAKA_HWID_CPU_ID='QEMU Virtual CPU'
   --token-out /tmp/machine.token
 ```
 
+Contract fixture check (no server):
+
+```bash
+./test/qemu/activate-client-contract.sh
+```
+
 ## Test
 
 ```bash
 # from staka-os repo root
 ./test/qemu/boot-iso.sh /mnt/staka-media/images/staka-*.iso
+./test/qemu/activate-client-contract.sh
 ```
