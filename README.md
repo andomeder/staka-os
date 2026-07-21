@@ -14,13 +14,27 @@ Status: early. Implementation is starting from measured compositor baselines.
 
 ```text
 brands/                 logo mark and wordmark
+packages/protocol/      shared Zod schemas and types
+packages/org-server/    org provisioning API + admin dashboard
 packages/image/         ISO build (omarchy-iso fork)
 test/laptop-bench/      headless-output measurement harness
 test/qemu/              QEMU boot helpers
+test/docker/            Postgres for integration tests
 test/artifacts/         dated bench snapshots
 ```
 
-Application crates and packages will land here as work proceeds. This tree intentionally starts thin.
+Bun workspace at the repo root. Tool versions are pinned in `mise.toml`.
+
+## Org server
+
+```bash
+mise install
+bun install
+bun test
+cd packages/org-server && cp .env.example .env && bun run dev
+```
+
+Docker: `packages/org-server/docker-compose.yml` (Postgres 18 + migrate + app).
 
 ## Headless output bench
 

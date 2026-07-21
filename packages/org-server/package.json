@@ -1,0 +1,34 @@
+{
+  "name": "@staka/org-server",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun --watch src/index.ts",
+    "start": "bun src/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "bun test",
+    "test:unit": "bun test test/*.test.ts",
+    "test:integration": "bun test test/*.e2e.test.ts test/schema.test.ts",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate",
+    "db:check": "drizzle-kit check",
+    "db:seed": "bun src/db/seed.ts"
+  },
+  "dependencies": {
+    "@hono/zod-openapi": "1.4.0",
+    "@staka/protocol": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "hono": "4.12.0",
+    "jose": "6.2.3",
+    "pino": "10.3.1",
+    "postgres": "3.4.9",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "bun-types": "1.3.14",
+    "drizzle-kit": "0.31.10",
+    "typescript": "7.0.2"
+  }
+}

@@ -1,0 +1,5 @@
+[tools]
+bun = "1.3.14"
+
+[env]
+_.path = ["{{config_root}}/node_modules/.bin"]

@@ -1,0 +1,12 @@
+{
+  "name": "staka-os",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "scripts": {
+    "test": "bun test packages/protocol packages/org-server",
+    "typecheck": "bun run --filter '*' typecheck"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2"
+  }
+}

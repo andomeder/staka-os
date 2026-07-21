@@ -1,0 +1,6 @@
+[install]
+minimumReleaseAge = 604800
+
+# Optional supply-chain scan when SOCKET_API_KEY is configured:
+# [install.security]
+# scanner = "@socketsecurity/bun-security-scanner"

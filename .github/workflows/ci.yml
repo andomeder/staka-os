@@ -1,0 +1,73 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_USER: staka_test
+          POSTGRES_DB: staka_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432
+        options: >-
+          --health-cmd "pg_isready -U staka_test -d staka_test"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Unit tests
+        run: bun test packages/protocol packages/org-server/test
+
+      - name: Resolve Postgres port
+        id: pg
+        run: |
+          PORT=$(docker port $(docker ps -q --filter ancestor=postgres:18-alpine | head -n1) 5432/tcp | head -n1 | awk -F: '{print $NF}')
+          if [ -z "$PORT" ]; then PORT=5432; fi
+          echo "port=$PORT" >> "$GITHUB_OUTPUT"
+          echo "DATABASE_URL=postgres://staka_test@127.0.0.1:${PORT}/staka_test" >> "$GITHUB_ENV"
+
+      - name: drizzle-kit check
+        working-directory: packages/org-server
+        run: |
+          if grep -qE 'pgTable|sqliteTable' src/db/schema.ts 2>/dev/null; then
+            bun run db:check
+          else
+            echo "no tables yet - skip drizzle-kit check"
+          fi
+
+      - name: Docker build check
+        run: docker build --check -f packages/org-server/Dockerfile .
+
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build org-server image
+        run: docker build -f packages/org-server/Dockerfile -t staka-org-server:ci .
