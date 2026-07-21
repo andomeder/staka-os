@@ -20,6 +20,8 @@ Firmware paths used by the scripts:
 |---|---|
 | `boot-iso.sh <iso>` | ISO + disposable qcow2 disk |
 | `boot-iso-sata.sh <iso> <block-dev>` | Same, plus raw block device pass-through |
+| `activate-client-contract.sh` | Static client/protocol contract check |
+| `slice1-smoke.md` | Manual Flow A end-to-end checklist |
 
 ```bash
 ./boot-iso.sh /path/to/staka.iso

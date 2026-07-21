@@ -112,6 +112,8 @@ Contract fixture check (no server):
 
 ```bash
 # from staka-os repo root
-./test/qemu/boot-iso.sh /mnt/staka-media/images/staka-*.iso
 ./test/qemu/activate-client-contract.sh
+./test/qemu/boot-iso.sh /mnt/staka-media/images/staka-*.iso
 ```
+
+Manual end-to-end Flow A checklist: `test/qemu/slice1-smoke.md`.
