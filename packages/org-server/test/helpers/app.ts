@@ -1,5 +1,6 @@
 import { createApp } from "../../src/app.ts";
 import type { DbPools } from "../../src/db/client.ts";
+import { AdminFlashStore } from "../../src/lib/admin-flash.ts";
 import { AdminSessionStore } from "../../src/lib/admin-session.ts";
 import {
   createCsrfSigner,
@@ -22,6 +23,7 @@ export async function createTestApp(opts: {
   jwtKeysJson?: string;
   rateLimiters?: ActivationRateLimiters;
   sessions?: AdminSessionStore;
+  flashes?: AdminFlashStore;
   autoApprove?: boolean;
   autoApproveActorId?: string;
   trustProxy?: boolean;
@@ -32,6 +34,7 @@ export async function createTestApp(opts: {
   const rateLimiters = opts.rateLimiters ?? createActivationRateLimiters();
   const statusCache = new MachineStatusCache(60_000);
   const sessions = opts.sessions ?? new AdminSessionStore();
+  const flashes = opts.flashes ?? new AdminFlashStore();
   const csrf = createCsrfSigner(csrfSecretFromJwtKeys(jwtKeysJson));
   const appDeps: Parameters<typeof createApp>[0] = {
     dbApp: opts.pools.app,
@@ -40,6 +43,7 @@ export async function createTestApp(opts: {
     rateLimiters,
     statusCache,
     sessions,
+    flashes,
     csrf,
     checkDb: async () => true,
     secureCookies: opts.secureCookies ?? false,
@@ -50,5 +54,14 @@ export async function createTestApp(opts: {
   }
   if (opts.trustProxy !== undefined) appDeps.trustProxy = opts.trustProxy;
   const app = createApp(appDeps);
-  return { app, keyring, rateLimiters, statusCache, sessions, csrf, jwtKeysJson };
+  return {
+    app,
+    keyring,
+    rateLimiters,
+    statusCache,
+    sessions,
+    flashes,
+    csrf,
+    jwtKeysJson,
+  };
 }

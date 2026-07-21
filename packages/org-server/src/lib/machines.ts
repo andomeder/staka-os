@@ -70,7 +70,12 @@ export async function revokeMachine(
       status: "revoked",
       enrollmentNoncePlain: null,
     })
-    .where(eq(machines.id, machineId))
+    .where(
+      and(
+        eq(machines.id, machineId),
+        sql`${machines.status} != 'revoked'`,
+      ),
+    )
     .returning(appMachineColumns);
   return updated ?? null;
 }

@@ -4,7 +4,8 @@ export type AdminSession = {
   expiresAt: number;
 };
 
-/** Single-process admin session store keyed by JWT jti. Restart clears sessions. */
+/** Single-process admin session store keyed by JWT jti. Restart clears sessions.
+ *  Not multi-instance safe: each process has its own map. */
 export class AdminSessionStore {
   private readonly sessions = new Map<string, AdminSession>();
 
@@ -14,6 +15,7 @@ export class AdminSessionStore {
     expiresAt: number;
     jti?: string;
   }): string {
+    this.gc();
     const jti = input.jti ?? crypto.randomUUID();
     this.sessions.set(jti, {
       userId: input.userId,
@@ -37,6 +39,17 @@ export class AdminSessionStore {
     return this.sessions.delete(jti);
   }
 
+  revokeUser(userId: string): number {
+    let n = 0;
+    for (const [jti, session] of this.sessions) {
+      if (session.userId === userId) {
+        this.sessions.delete(jti);
+        n += 1;
+      }
+    }
+    return n;
+  }
+
   rotate(
     oldJti: string,
     input: { userId: string; employeeId: string; expiresAt: number },
@@ -50,5 +63,12 @@ export class AdminSessionStore {
 
   reset(): void {
     this.sessions.clear();
+  }
+
+  private gc(now = Date.now()): void {
+    if (this.sessions.size < 256) return;
+    for (const [jti, session] of this.sessions) {
+      if (session.expiresAt <= now) this.sessions.delete(jti);
+    }
   }
 }

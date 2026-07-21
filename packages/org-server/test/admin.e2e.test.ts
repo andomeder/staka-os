@@ -366,6 +366,25 @@ describe("admin api e2e", () => {
     expect(csrf2).toBeTruthy();
     const cookieHeader = `staka_admin=${encodeURIComponent(cookies2.staka_admin)}; csrf=${encodeURIComponent(csrf2)}`;
 
+    const badCsrf = await app.request(
+      `/admin/machines/${enrollBody.machine_id}/approve`,
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          cookie: cookieHeader,
+        },
+        body: new URLSearchParams({ csrf: "not-a-valid-token" }).toString(),
+        redirect: "manual",
+      },
+    );
+    expect([302, 303]).toContain(badCsrf.status);
+    const stillPending = await pools.owner
+      .select()
+      .from(machines)
+      .where(eq(machines.id, enrollBody.machine_id));
+    expect(stillPending[0]?.status).toBe("pending");
+
     const approve = await app.request(
       `/admin/machines/${enrollBody.machine_id}/approve`,
       {
@@ -380,13 +399,23 @@ describe("admin api e2e", () => {
     );
     expect([302, 303]).toContain(approve.status);
     const loc = approve.headers.get("location") ?? "";
-    expect(loc).toContain("nonce=");
+    expect(loc).not.toContain("nonce=");
+    expect(loc).not.toMatch(/[?&]code=/);
+
+    const detail = await app.request(loc.startsWith("http") ? loc : loc, {
+      headers: { cookie: cookieHeader },
+    });
+    expect(detail.status).toBe(200);
+    const detailHtml = await detail.text();
+    expect(detailHtml).toContain("Enrollment nonce");
+    expect(detailHtml).toContain("approved");
 
     const [row] = await pools.owner
       .select()
       .from(machines)
       .where(eq(machines.id, enrollBody.machine_id));
     expect(row?.status).toBe("approved");
+    expect(row?.enrollmentNoncePlain).toBeTruthy();
     expect(code?.id).toBeTruthy();
 
     const audits = await pools.owner.select().from(adminAuditLog);
@@ -474,5 +503,109 @@ describe("admin api e2e", () => {
       },
     );
     expect(selfDeact.status).toBe(400);
+  });
+
+  test("deactivate admin kills live sessions and refresh", async () => {
+    const { app } = await createTestApp({ pools });
+    const actor = await seedAdmin("actor-pass-123");
+    const target = await seedAdmin("target-pass-123");
+    const actorJwt = await login(app, actor.admin.employeeId, actor.password);
+    const targetJwt = await login(app, target.admin.employeeId, target.password);
+
+    const before = await app.request("/v1/admin/users", {
+      headers: { authorization: `Bearer ${targetJwt}` },
+    });
+    expect(before.status).toBe(200);
+
+    const deact = await app.request(
+      `/v1/admin/users/${target.admin.id}/deactivate`,
+      {
+        method: "POST",
+        headers: authHeaders(actorJwt),
+        body: JSON.stringify({}),
+      },
+    );
+    expect(deact.status).toBe(200);
+
+    const after = await app.request("/v1/admin/users", {
+      headers: { authorization: `Bearer ${targetJwt}` },
+    });
+    expect(after.status).toBe(401);
+
+    const refresh = await app.request("/v1/auth/refresh", {
+      method: "POST",
+      headers: { authorization: `Bearer ${targetJwt}` },
+    });
+    expect(refresh.status).toBe(401);
+  });
+
+  test("dashboard code create does not put plaintext in Location", async () => {
+    const { app } = await createTestApp({ pools });
+    const { admin, password } = await seedAdmin();
+
+    const loginPage = await app.request("/admin/login");
+    const loginHtml = await loginPage.text();
+    const csrf = loginHtml.match(/name="csrf" value="([^"]+)"/)?.[1];
+    expect(csrf).toBeTruthy();
+    const loginPost = await app.request("/admin/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `csrf=${encodeURIComponent(csrf!)}`,
+      },
+      body: new URLSearchParams({
+        csrf: csrf!,
+        employee_id: admin.employeeId,
+        password,
+      }).toString(),
+      redirect: "manual",
+    });
+    const cookies = parseSetCookies(loginPost);
+    const sessionCookie = `staka_admin=${encodeURIComponent(cookies.staka_admin)}; csrf=${encodeURIComponent(cookies.csrf ?? csrf!)}`;
+
+    const [staff] = await pools.owner
+      .insert(users)
+      .values({
+        employeeId: `EMP-CD-${crypto.randomUUID().slice(0, 8)}`,
+        displayName: "Code Target",
+        role: "staff",
+        status: "invited",
+      })
+      .returning();
+
+    const codesPage = await app.request("/admin/codes", {
+      headers: { cookie: sessionCookie },
+    });
+    const codesHtml = await codesPage.text();
+    const csrf2 =
+      parseSetCookies(codesPage).csrf ??
+      codesHtml.match(/name="csrf" value="([^"]+)"/)?.[1];
+    expect(csrf2).toBeTruthy();
+    const cookieHeader = `staka_admin=${encodeURIComponent(cookies.staka_admin)}; csrf=${encodeURIComponent(csrf2!)}`;
+
+    const create = await app.request("/admin/codes", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: cookieHeader,
+      },
+      body: new URLSearchParams({
+        csrf: csrf2!,
+        user_id: staff!.id,
+        flow: "admin",
+        max_uses: "1",
+      }).toString(),
+      redirect: "manual",
+    });
+    expect([302, 303]).toContain(create.status);
+    const loc = create.headers.get("location") ?? "";
+    expect(loc).not.toMatch(/[?&]code=/);
+    expect(loc).not.toContain("STAKA-");
+
+    const follow = await app.request(loc, { headers: { cookie: cookieHeader } });
+    expect(follow.status).toBe(200);
+    const html = await follow.text();
+    expect(html).toContain("New code (shown once)");
+    expect(html).toContain("STAKA-");
   });
 });

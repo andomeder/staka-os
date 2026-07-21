@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { createDb } from "../db/client.ts";
 import { users } from "../db/schema.ts";
 import { createActivationCode } from "../lib/admin-codes.ts";
@@ -30,9 +30,16 @@ async function main() {
   const [actor] = await db
     .select()
     .from(users)
-    .where(eq(users.employeeId, actorEmployeeId))
+    .where(
+      and(
+        eq(users.employeeId, actorEmployeeId),
+        eq(users.role, "admin"),
+        eq(users.status, "active"),
+        isNull(users.deletedAt),
+      ),
+    )
     .limit(1);
-  if (!actor || actor.role !== "admin") {
+  if (!actor) {
     throw new Error(`admin actor not found: ${actorEmployeeId}`);
   }
 
@@ -41,10 +48,19 @@ async function main() {
     const [user] = await db
       .select()
       .from(users)
-      .where(eq(users.employeeId, employeeId!))
+      .where(
+        and(eq(users.employeeId, employeeId!), isNull(users.deletedAt)),
+      )
       .limit(1);
     if (!user) throw new Error(`user not found: ${employeeId}`);
     userId = user.id;
+  } else {
+    const [user] = await db
+      .select()
+      .from(users)
+      .where(and(eq(users.id, userId), isNull(users.deletedAt)))
+      .limit(1);
+    if (!user) throw new Error(`user not found: ${userId}`);
   }
 
   const { code, plaintext } = await createActivationCode(db, {

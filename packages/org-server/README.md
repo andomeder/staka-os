@@ -70,6 +70,8 @@ bun run code:create -- --employee-id EMP-0001 --flow admin
 - Enrollment codes are always bound to a user.
 - Machine JWTs are Ed25519 with `kid`; status is re-checked in DB.
 - Admin JWTs carry `jti` and are tracked in an in-memory session store (rotation + logout).
+  Single-process only: not multi-instance safe; restart logs everyone out.
+- Dashboard secrets (nonce/code/PII) use one-shot server flash keyed by jti, not query strings.
 - Dashboard CSRF is signed double-submit + `SameSite=Strict` admin cookie.
 - `STAKA_AUTO_APPROVE` requires a paired confirm flag and refuses production boot.
 - `bun run audit:verify` walks the admin audit forward hash-chain. Residual risk:

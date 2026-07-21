@@ -98,6 +98,7 @@ const STYLES = `
 export function Layout(props: {
   title: string;
   employeeId?: string;
+  csrf?: string;
   children: Child;
 }) {
   return (
@@ -121,6 +122,9 @@ export function Layout(props: {
                 <a href="/admin/codes">Codes</a>
                 <span class="muted">{props.employeeId}</span>
                 <form class="inline" method="post" action="/admin/logout">
+                  {props.csrf ? (
+                    <input type="hidden" name="csrf" value={props.csrf} />
+                  ) : null}
                   <button class="secondary" type="submit">
                     Log out
                   </button>

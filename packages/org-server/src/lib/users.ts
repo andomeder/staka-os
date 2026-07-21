@@ -11,10 +11,35 @@ export type CreateUserInput = {
   email?: string;
 };
 
+/** Public user fields - never includes password_hash. */
+export type PublicUser = {
+  id: string;
+  employeeId: string;
+  email: string | null;
+  displayName: string;
+  role: User["role"];
+  status: User["status"];
+  createdAt: Date;
+  updatedAt: Date;
+  deletedAt: Date | null;
+};
+
+export const publicUserColumns = {
+  id: users.id,
+  employeeId: users.employeeId,
+  email: users.email,
+  displayName: users.displayName,
+  role: users.role,
+  status: users.status,
+  createdAt: users.createdAt,
+  updatedAt: users.updatedAt,
+  deletedAt: users.deletedAt,
+} as const;
+
 export async function createUser(
   db: Db,
   input: CreateUserInput,
-): Promise<User> {
+): Promise<PublicUser> {
   const passwordHash = input.initialPassword
     ? await hashPassword(input.initialPassword)
     : null;
@@ -27,22 +52,28 @@ export async function createUser(
     passwordHash,
   };
   if (input.email !== undefined) values.email = input.email;
-  const [row] = await db.insert(users).values(values).returning();
+  const [row] = await db
+    .insert(users)
+    .values(values)
+    .returning(publicUserColumns);
   if (!row) throw new Error("failed to create user");
   return row;
 }
 
-export async function listUsers(db: Db): Promise<User[]> {
+export async function listUsers(db: Db): Promise<PublicUser[]> {
   return db
-    .select()
+    .select(publicUserColumns)
     .from(users)
     .where(isNull(users.deletedAt))
     .orderBy(asc(users.createdAt));
 }
 
-export async function getUserById(db: Db, id: string): Promise<User | null> {
+export async function getUserById(
+  db: Db,
+  id: string,
+): Promise<PublicUser | null> {
   const [row] = await db
-    .select()
+    .select(publicUserColumns)
     .from(users)
     .where(and(eq(users.id, id), isNull(users.deletedAt)))
     .limit(1);
@@ -52,9 +83,12 @@ export async function getUserById(db: Db, id: string): Promise<User | null> {
 export async function getActiveAdminByEmployeeId(
   db: Db,
   employeeId: string,
-): Promise<User | null> {
+): Promise<(PublicUser & { passwordHash: string | null }) | null> {
   const [row] = await db
-    .select()
+    .select({
+      ...publicUserColumns,
+      passwordHash: users.passwordHash,
+    })
     .from(users)
     .where(
       and(
@@ -68,10 +102,29 @@ export async function getActiveAdminByEmployeeId(
   return row ?? null;
 }
 
+export async function getActiveAdminById(
+  db: Db,
+  id: string,
+): Promise<PublicUser | null> {
+  const [row] = await db
+    .select(publicUserColumns)
+    .from(users)
+    .where(
+      and(
+        eq(users.id, id),
+        eq(users.role, "admin"),
+        eq(users.status, "active"),
+        isNull(users.deletedAt),
+      ),
+    )
+    .limit(1);
+  return row ?? null;
+}
+
 export async function deactivateUser(
   db: Db,
   id: string,
-): Promise<User | null> {
+): Promise<PublicUser | null> {
   const now = new Date();
   const [row] = await db
     .update(users)
@@ -80,7 +133,7 @@ export async function deactivateUser(
       deletedAt: now,
     })
     .where(and(eq(users.id, id), isNull(users.deletedAt)))
-    .returning();
+    .returning(publicUserColumns);
   return row ?? null;
 }
 
@@ -88,7 +141,7 @@ export async function setUserPassword(
   db: Db,
   id: string,
   password: string,
-): Promise<User | null> {
+): Promise<PublicUser | null> {
   const passwordHash = await hashPassword(password);
   const [row] = await db
     .update(users)
@@ -97,6 +150,6 @@ export async function setUserPassword(
       status: "active",
     })
     .where(and(eq(users.id, id), isNull(users.deletedAt)))
-    .returning();
+    .returning(publicUserColumns);
   return row ?? null;
 }

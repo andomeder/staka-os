@@ -1,23 +1,29 @@
+import {
+  CreateCodeRequest,
+  CreateUserRequest,
+} from "@staka/protocol";
 import { desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Db } from "../db/client.ts";
 import { appMachineColumns } from "../db/machine-columns.ts";
-import { machines, usageLogs, users } from "../db/schema.ts";
+import { machines, usageLogs } from "../db/schema.ts";
 import {
   createActivationCode,
   listActivationCodes,
   revokeActivationCode,
 } from "../lib/admin-codes.ts";
+import { loginAdmin } from "../lib/admin-auth-tokens.ts";
+import type { AdminFlashStore } from "../lib/admin-flash.ts";
 import { appendAudit } from "../lib/audit.ts";
 import type { CsrfSigner } from "../lib/csrf.ts";
-import { signJwt, verifyJwt } from "../lib/jwt.ts";
+import { sanitizeFlash } from "../lib/flash-messages.ts";
+import { verifyJwt } from "../lib/jwt.ts";
 import {
   approveMachine,
   revokeMachine,
   suspendMachine,
 } from "../lib/machines.ts";
-import { verifyPassword } from "../lib/password.ts";
 import {
   clientIp,
   type ActivationRateLimiters,
@@ -25,9 +31,11 @@ import {
 import { listMachines } from "../lib/reports.ts";
 import {
   createUser,
-  getActiveAdminByEmployeeId,
+  getUserById,
   listUsers,
+  publicUserColumns,
 } from "../lib/users.ts";
+import { users } from "../db/schema.ts";
 import {
   adminCookieOrBearerAuth,
   type AdminAuthDeps,
@@ -43,13 +51,12 @@ import {
 
 const ADMIN_COOKIE = "staka_admin";
 const CSRF_COOKIE = "csrf";
-const ADMIN_JWT_TTL = "8h";
 const ADMIN_JWT_TTL_SEC = 8 * 60 * 60;
 
 export type DashboardDeps = AdminAuthDeps & {
-  dbApp: Db;
   dbAdmin: Db;
   csrf: CsrfSigner;
+  flashes: AdminFlashStore;
   rateLimiters: ActivationRateLimiters;
   trustProxy?: boolean;
   secureCookies?: boolean;
@@ -57,6 +64,12 @@ export type DashboardDeps = AdminAuthDeps & {
 
 function userLabel(employeeId: string, displayName: string): string {
   return `${displayName} (${employeeId})`;
+}
+
+function isUuid(v: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+    v,
+  );
 }
 
 export function dashboardRoutes(deps: DashboardDeps) {
@@ -98,7 +111,7 @@ export function dashboardRoutes(deps: DashboardDeps) {
 
   app.get("/admin/login", (c) => {
     const csrf = mintCsrf(c);
-    const error = c.req.query("error");
+    const error = sanitizeFlash(c.req.query("error"));
     return c.html(<LoginPage csrf={csrf} {...(error ? { error } : {})} />);
   });
 
@@ -120,31 +133,16 @@ export function dashboardRoutes(deps: DashboardDeps) {
     const empHit = deps.rateLimiters.adminLoginEmployee.hit(`emp:${employeeId}`);
     if (!empHit.ok) return c.redirect("/admin/login?error=rate_limited");
 
-    const user = await getActiveAdminByEmployeeId(deps.dbApp, employeeId);
-    if (!user?.passwordHash) {
-      return c.redirect("/admin/login?error=invalid");
-    }
-    const ok = await verifyPassword(password, user.passwordHash);
-    if (!ok) return c.redirect("/admin/login?error=invalid");
-
-    const expiresAtSec = Math.floor(Date.now() / 1000) + ADMIN_JWT_TTL_SEC;
-    const jti = deps.sessions.create({
-      userId: user.id,
-      employeeId: user.employeeId,
-      expiresAt: expiresAtSec * 1000,
+    const minted = await loginAdmin({
+      db: deps.dbApp,
+      keyring: deps.keyring,
+      sessions: deps.sessions,
+      employeeId,
+      password,
     });
-    const { token } = await signJwt(
-      deps.keyring,
-      {
-        sub: user.id,
-        role: "admin",
-        employee_id: user.employeeId,
-        jti,
-      },
-      { expiresIn: ADMIN_JWT_TTL },
-    );
+    if (!minted) return c.redirect("/admin/login?error=invalid");
 
-    setCookie(c, ADMIN_COOKIE, token, {
+    setCookie(c, ADMIN_COOKIE, minted.token, {
       path: "/",
       httpOnly: true,
       sameSite: "Strict",
@@ -156,6 +154,9 @@ export function dashboardRoutes(deps: DashboardDeps) {
   });
 
   app.post("/admin/logout", async (c) => {
+    const checked = await requireCsrf(c);
+    if (!checked.ok) return c.redirect("/admin/login?error=csrf");
+
     const token = getCookie(c, ADMIN_COOKIE);
     if (token) {
       try {
@@ -171,12 +172,22 @@ export function dashboardRoutes(deps: DashboardDeps) {
   });
 
   const authed = new Hono();
-  authed.use("*", adminCookieOrBearerAuth({ ...deps, cookieName: ADMIN_COOKIE }));
+  authed.use(
+    "*",
+    adminCookieOrBearerAuth({
+      keyring: deps.keyring,
+      sessions: deps.sessions,
+      dbApp: deps.dbApp,
+      cookieName: ADMIN_COOKIE,
+    }),
+  );
 
   authed.get("/", async (c) => {
     const auth = c.get("adminAuth");
     const csrf = mintCsrf(c);
-    const flash = c.req.query("flash") ?? undefined;
+    const flash =
+      deps.flashes.take(auth.jti)?.message ??
+      sanitizeFlash(c.req.query("flash"));
     const machineRows = await listMachines(deps.dbApp);
     const userRows = await listUsers(deps.dbApp);
     const byId = new Map(userRows.map((u) => [u.id, u]));
@@ -206,10 +217,12 @@ export function dashboardRoutes(deps: DashboardDeps) {
   authed.get("/machines/:id", async (c) => {
     const auth = c.get("adminAuth");
     const id = c.req.param("id");
+    if (!isUuid(id)) return c.notFound();
     const csrf = mintCsrf(c);
-    const flash = c.req.query("flash") ?? undefined;
-    const nonce = c.req.query("nonce") ?? undefined;
-    const showPii = c.req.query("pii") === "1";
+    const taken = deps.flashes.take(auth.jti);
+    const flash = taken?.message ?? sanitizeFlash(c.req.query("flash"));
+    const nonce = taken?.nonce;
+    const hwidJson = taken?.hwidJson;
 
     const [machine] = await deps.dbApp
       .select(appMachineColumns)
@@ -219,41 +232,21 @@ export function dashboardRoutes(deps: DashboardDeps) {
     if (!machine) return c.notFound();
 
     const [user] = await deps.dbApp
-      .select()
+      .select(publicUserColumns)
       .from(users)
       .where(eq(users.id, machine.userId))
       .limit(1);
 
     const logs = await deps.dbApp
-      .select()
+      .select({
+        id: usageLogs.id,
+        eventType: usageLogs.eventType,
+        createdAt: usageLogs.createdAt,
+      })
       .from(usageLogs)
       .where(eq(usageLogs.machineId, id))
       .orderBy(desc(usageLogs.createdAt))
       .limit(50);
-
-    let hwidJson: string | undefined;
-    if (showPii) {
-      const [row] = await deps.dbAdmin
-        .select({ hwidComponents: machines.hwidComponents })
-        .from(machines)
-        .where(eq(machines.id, id))
-        .limit(1);
-      if (row) {
-        await appendAudit(deps.dbApp, {
-          actorUserId: auth.userId,
-          action: "pii.read",
-          targetType: "machine",
-          targetId: id,
-          payload: { field: "hwid_components", via: "dashboard" },
-        });
-        await deps.dbApp.insert(usageLogs).values({
-          machineId: id,
-          eventType: "admin_read_pii",
-          payload: { actor_user_id: auth.userId, via: "dashboard" },
-        });
-        hwidJson = JSON.stringify(row.hwidComponents, null, 2);
-      }
-    }
 
     return c.html(
       <MachineDetailPage
@@ -288,14 +281,21 @@ export function dashboardRoutes(deps: DashboardDeps) {
   authed.post("/machines/:id/approve", async (c) => {
     const auth = c.get("adminAuth");
     const id = c.req.param("id");
+    if (!isUuid(id)) return c.redirect("/admin?flash=invalid");
     const checked = await requireCsrf(c);
-    if (!checked.ok) return c.redirect(`/admin/machines/${id}?flash=csrf`);
+    if (!checked.ok) {
+      deps.flashes.set(auth.jti, { message: "csrf" });
+      return c.redirect(`/admin/machines/${id}`);
+    }
 
     const result = await approveMachine(deps.dbApp, {
       machineId: id,
       approvedBy: auth.userId,
     });
-    if (!result) return c.redirect(`/admin/machines/${id}?flash=not_pending`);
+    if (!result) {
+      deps.flashes.set(auth.jti, { message: "not_pending" });
+      return c.redirect(`/admin/machines/${id}`);
+    }
 
     await appendAudit(deps.dbApp, {
       actorUserId: auth.userId,
@@ -305,16 +305,22 @@ export function dashboardRoutes(deps: DashboardDeps) {
       payload: { via: "dashboard" },
     });
 
-    return c.redirect(
-      `/admin/machines/${id}?flash=approved&nonce=${encodeURIComponent(result.enrollmentNonce)}`,
-    );
+    deps.flashes.set(auth.jti, {
+      message: "approved",
+      nonce: result.enrollmentNonce,
+    });
+    return c.redirect(`/admin/machines/${id}`);
   });
 
   authed.post("/machines/:id/suspend", async (c) => {
     const auth = c.get("adminAuth");
     const id = c.req.param("id");
+    if (!isUuid(id)) return c.redirect("/admin?flash=invalid");
     const checked = await requireCsrf(c);
-    if (!checked.ok) return c.redirect(`/admin?flash=csrf`);
+    if (!checked.ok) {
+      deps.flashes.set(auth.jti, { message: "csrf" });
+      return c.redirect("/admin");
+    }
 
     const updated = await suspendMachine(deps.dbApp, id);
     if (updated) {
@@ -325,15 +331,20 @@ export function dashboardRoutes(deps: DashboardDeps) {
         targetId: id,
         payload: { via: "dashboard" },
       });
+      deps.flashes.set(auth.jti, { message: "suspended" });
     }
-    return c.redirect("/admin?flash=suspended");
+    return c.redirect("/admin");
   });
 
   authed.post("/machines/:id/revoke", async (c) => {
     const auth = c.get("adminAuth");
     const id = c.req.param("id");
+    if (!isUuid(id)) return c.redirect("/admin?flash=invalid");
     const checked = await requireCsrf(c);
-    if (!checked.ok) return c.redirect(`/admin?flash=csrf`);
+    if (!checked.ok) {
+      deps.flashes.set(auth.jti, { message: "csrf" });
+      return c.redirect("/admin");
+    }
 
     const updated = await revokeMachine(deps.dbApp, id);
     if (updated) {
@@ -344,24 +355,61 @@ export function dashboardRoutes(deps: DashboardDeps) {
         targetId: id,
         payload: { via: "dashboard" },
       });
+      deps.flashes.set(auth.jti, { message: "revoked" });
     }
-    return c.redirect("/admin?flash=revoked");
+    return c.redirect("/admin");
   });
 
   authed.post("/machines/:id/hwid", async (c) => {
+    const auth = c.get("adminAuth");
     const id = c.req.param("id");
+    if (!isUuid(id)) return c.redirect("/admin?flash=invalid");
     const checked = await requireCsrf(c);
-    if (!checked.ok) return c.redirect(`/admin/machines/${id}?flash=csrf`);
-    return c.redirect(`/admin/machines/${id}?pii=1`);
+    if (!checked.ok) {
+      deps.flashes.set(auth.jti, { message: "csrf" });
+      return c.redirect(`/admin/machines/${id}`);
+    }
+
+    const [row] = await deps.dbAdmin
+      .select({ hwidComponents: machines.hwidComponents })
+      .from(machines)
+      .where(eq(machines.id, id))
+      .limit(1);
+    if (!row) {
+      deps.flashes.set(auth.jti, { message: "not_found" });
+      return c.redirect(`/admin/machines/${id}`);
+    }
+
+    await appendAudit(deps.dbApp, {
+      actorUserId: auth.userId,
+      action: "pii.read",
+      targetType: "machine",
+      targetId: id,
+      payload: { field: "hwid_components", via: "dashboard" },
+    });
+    await deps.dbApp.insert(usageLogs).values({
+      machineId: id,
+      eventType: "admin_read_pii",
+      payload: { actor_user_id: auth.userId, via: "dashboard" },
+    });
+
+    deps.flashes.set(auth.jti, {
+      hwidJson: JSON.stringify(row.hwidComponents, null, 2),
+    });
+    return c.redirect(`/admin/machines/${id}`);
   });
 
   authed.get("/users", async (c) => {
     const auth = c.get("adminAuth");
-    const flash = c.req.query("flash") ?? undefined;
+    const csrf = mintCsrf(c);
+    const flash =
+      deps.flashes.take(auth.jti)?.message ??
+      sanitizeFlash(c.req.query("flash"));
     const rows = await listUsers(deps.dbApp);
     return c.html(
       <UsersPage
         employeeId={auth.employeeId}
+        csrf={csrf}
         {...(flash ? { flash } : {})}
         users={rows.map((u) => ({
           id: u.id,
@@ -377,7 +425,9 @@ export function dashboardRoutes(deps: DashboardDeps) {
   authed.get("/users/new", async (c) => {
     const auth = c.get("adminAuth");
     const csrf = mintCsrf(c);
-    const error = c.req.query("error");
+    const error =
+      deps.flashes.take(auth.jti)?.message ??
+      sanitizeFlash(c.req.query("error"));
     return c.html(
       <NewUserPage
         employeeId={auth.employeeId}
@@ -390,45 +440,64 @@ export function dashboardRoutes(deps: DashboardDeps) {
   authed.post("/users", async (c) => {
     const auth = c.get("adminAuth");
     const checked = await requireCsrf(c);
-    if (!checked.ok) return c.redirect("/admin/users/new?error=csrf");
+    if (!checked.ok) {
+      deps.flashes.set(auth.jti, { message: "csrf" });
+      return c.redirect("/admin/users/new");
+    }
 
-    const employeeId = checked.body.employee_id?.trim() ?? "";
-    const displayName = checked.body.display_name?.trim() ?? "";
-    const role = checked.body.role === "admin" ? "admin" : "staff";
-    const emailRaw = checked.body.email?.trim();
-    const passwordRaw = checked.body.initial_password;
-
-    if (!employeeId || !displayName) {
-      return c.redirect("/admin/users/new?error=invalid");
+    const raw = {
+      employee_id: checked.body.employee_id?.trim() ?? "",
+      display_name: checked.body.display_name?.trim() ?? "",
+      role: checked.body.role === "admin" ? "admin" : "staff",
+      ...(checked.body.email?.trim()
+        ? { email: checked.body.email.trim() }
+        : {}),
+      ...(checked.body.initial_password
+        ? { initial_password: checked.body.initial_password }
+        : {}),
+    };
+    const parsed = CreateUserRequest.safeParse(raw);
+    if (!parsed.success) {
+      deps.flashes.set(auth.jti, { message: "invalid" });
+      return c.redirect("/admin/users/new");
     }
 
     try {
       const createInput: Parameters<typeof createUser>[1] = {
-        employeeId,
-        displayName,
-        role,
+        employeeId: parsed.data.employee_id,
+        displayName: parsed.data.display_name,
+        role: parsed.data.role,
       };
-      if (emailRaw) createInput.email = emailRaw;
-      if (passwordRaw) createInput.initialPassword = passwordRaw;
+      if (parsed.data.email !== undefined) createInput.email = parsed.data.email;
+      if (parsed.data.initial_password !== undefined) {
+        createInput.initialPassword = parsed.data.initial_password;
+      }
       const user = await createUser(deps.dbApp, createInput);
       await appendAudit(deps.dbApp, {
         actorUserId: auth.userId,
         action: "user.create",
         targetType: "user",
         targetId: user.id,
-        payload: { via: "dashboard", employee_id: employeeId, role },
+        payload: {
+          via: "dashboard",
+          employee_id: user.employeeId,
+          role: user.role,
+        },
       });
-      return c.redirect("/admin/users?flash=created");
+      deps.flashes.set(auth.jti, { message: "created" });
+      return c.redirect("/admin/users");
     } catch {
-      return c.redirect("/admin/users/new?error=conflict");
+      deps.flashes.set(auth.jti, { message: "conflict" });
+      return c.redirect("/admin/users/new");
     }
   });
 
   authed.get("/codes", async (c) => {
     const auth = c.get("adminAuth");
     const csrf = mintCsrf(c);
-    const flash = c.req.query("flash");
-    const createdCode = c.req.query("code");
+    const taken = deps.flashes.take(auth.jti);
+    const flash = taken?.message ?? sanitizeFlash(c.req.query("flash"));
+    const createdCode = taken?.code;
     const userRows = await listUsers(deps.dbApp);
     const codeRows = await listActivationCodes(deps.dbApp);
     const byId = new Map(userRows.map((u) => [u.id, u]));
@@ -465,36 +534,66 @@ export function dashboardRoutes(deps: DashboardDeps) {
   authed.post("/codes", async (c) => {
     const auth = c.get("adminAuth");
     const checked = await requireCsrf(c);
-    if (!checked.ok) return c.redirect("/admin/codes?flash=csrf");
+    if (!checked.ok) {
+      deps.flashes.set(auth.jti, { message: "csrf" });
+      return c.redirect("/admin/codes");
+    }
 
-    const userId = checked.body.user_id ?? "";
-    const flow = checked.body.flow === "self" ? "self" : "admin";
-    const maxUses = Number(checked.body.max_uses ?? "1");
-    if (!userId) return c.redirect("/admin/codes?flash=invalid");
+    const maxUsesRaw = checked.body.max_uses?.trim();
+    const raw = {
+      user_id: checked.body.user_id ?? "",
+      flow: checked.body.flow === "self" ? "self" : "admin",
+      ...(maxUsesRaw
+        ? { max_uses: Number(maxUsesRaw) }
+        : {}),
+    };
+    const parsed = CreateCodeRequest.safeParse(raw);
+    if (!parsed.success) {
+      deps.flashes.set(auth.jti, { message: "invalid" });
+      return c.redirect("/admin/codes");
+    }
 
-    const { code, plaintext } = await createActivationCode(deps.dbApp, {
-      userId,
+    const user = await getUserById(deps.dbApp, parsed.data.user_id);
+    if (!user) {
+      deps.flashes.set(auth.jti, { message: "user_not_found" });
+      return c.redirect("/admin/codes");
+    }
+
+    const codeInput: Parameters<typeof createActivationCode>[1] = {
+      userId: parsed.data.user_id,
       createdBy: auth.userId,
-      flow,
-      maxUses: Number.isFinite(maxUses) ? maxUses : 1,
-    });
+      flow: parsed.data.flow,
+    };
+    if (parsed.data.max_uses !== undefined) {
+      codeInput.maxUses = parsed.data.max_uses;
+    }
+    const { code, plaintext } = await createActivationCode(
+      deps.dbApp,
+      codeInput,
+    );
     await appendAudit(deps.dbApp, {
       actorUserId: auth.userId,
       action: "code.create",
       targetType: "activation_code",
       targetId: code.id,
-      payload: { via: "dashboard", flow },
+      payload: { via: "dashboard", flow: code.flow },
     });
-    return c.redirect(
-      `/admin/codes?flash=created&code=${encodeURIComponent(plaintext)}`,
-    );
+    deps.flashes.set(auth.jti, { message: "created", code: plaintext });
+    return c.redirect("/admin/codes");
   });
 
   authed.post("/codes/:id/revoke", async (c) => {
     const auth = c.get("adminAuth");
     const id = c.req.param("id");
+    if (!isUuid(id)) {
+      deps.flashes.set(auth.jti, { message: "invalid" });
+      return c.redirect("/admin/codes");
+    }
     const checked = await requireCsrf(c);
-    if (!checked.ok) return c.redirect("/admin/codes?flash=csrf");
+    if (!checked.ok) {
+      deps.flashes.set(auth.jti, { message: "csrf" });
+      return c.redirect("/admin/codes");
+    }
 
     const updated = await revokeActivationCode(deps.dbApp, id);
     if (updated) {
@@ -505,8 +604,9 @@ export function dashboardRoutes(deps: DashboardDeps) {
         targetId: id,
         payload: { via: "dashboard" },
       });
+      deps.flashes.set(auth.jti, { message: "revoked" });
     }
-    return c.redirect("/admin/codes?flash=revoked");
+    return c.redirect("/admin/codes");
   });
 
   app.route("/admin", authed);
