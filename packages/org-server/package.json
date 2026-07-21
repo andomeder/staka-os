@@ -11,9 +11,11 @@
     "test:unit": "bun test test/*.test.ts",
     "test:integration": "bun test test/*.e2e.test.ts test/schema.test.ts",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate",
+    "db:migrate": "bun src/db/migrate.ts",
     "db:check": "drizzle-kit check",
-    "db:seed": "bun src/db/seed.ts"
+    "db:seed": "bun src/db/seed.ts",
+    "db:migrate:kit": "drizzle-kit migrate",
+    "audit:verify": "bun src/scripts/audit-verify.ts"
   },
   "dependencies": {
     "@hono/zod-openapi": "1.4.0",
