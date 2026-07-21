@@ -1,7 +1,7 @@
 # Local bench output (re-runs)
 test/laptop-bench/results/
 
-# Build / deps (future)
+# Build / deps
 target/
 node_modules/
 dist/
@@ -13,6 +13,8 @@ build/
 .venv/
 __pycache__/
 *.pyc
+coverage/
+*.tsbuildinfo
 
 # Editor / OS
 .DS_Store
@@ -28,6 +30,7 @@ __pycache__/
 !.env.example
 *.pem
 *.key
+packages/org-server/secrets/
 
 # Logs / temp
 *.log
