@@ -452,7 +452,7 @@ export function activateRoutes(deps: ActivateDeps) {
 
     const machineId = typeof payload.sub === "string" ? payload.sub : null;
     if (!machineId) return err(c, 401, "unauthorized");
-    if (payload.typ === "self_provision") {
+    if (payload.typ !== "machine") {
       return err(c, 401, "unauthorized");
     }
 

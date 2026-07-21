@@ -4,6 +4,7 @@ import { z } from "zod";
 export const MachineJwtClaims = z
   .object({
     sub: z.string().uuid(),
+    typ: z.literal("machine"),
     iat: z.number().int(),
     exp: z.number().int(),
     kid: z.string().min(1),
