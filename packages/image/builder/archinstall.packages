@@ -1,7 +1,11 @@
+# Packages pulled into the offline ISO mirror for archinstall + activation.
+# Pin archinstall so the Python 3.14 installer.py patches stay valid.
 alsa-firmware
 amd-ucode
+archinstall=4.4-1
 base
 base-devel
+curl
 efibootmgr
 intel-ucode
 linux-firmware
