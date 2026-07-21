@@ -14,7 +14,11 @@ See `NOTICE` and upstream `LICENSE`.
 |---|---|
 | `bin/staka-iso-make` | Host entrypoint (Docker) |
 | `builder/build-iso.sh` | Runs inside the build container |
+| `builder/archinstall.packages` | Offline mirror package list (pinned `archinstall`) |
 | `configs/` | ISO overlay (profile, pacman, airootfs) |
+| `configs/airootfs/root/staka-configurator` | First-boot org activation + install form |
+| `configs/airootfs/root/staka-activate.sh` | HWID capture, enroll, poll, token write |
+| `configs/airootfs/root/helpers/` | Vendored installer UI helpers |
 | `branding/` | Installer ASCII logo + Plymouth theme assets |
 | `archiso/` | Arch releng profile checkout (not stored in git; clone at build time) |
 
@@ -44,6 +48,31 @@ cd /mnt/staka-media/build/image
 ISO lands in `/mnt/staka-media/images/`.
 
 Caches stay on the SATA volume so repeat builds avoid re-downloading packages, Node, and the installer tree when the network is slow.
+
+## Activation client (live ISO)
+
+On boot, `.automated_script.sh` runs `staka-configurator`, which collects org
+URL + enrollment code + hostname (Flow B also asks for employee id + password),
+then calls `staka-activate.sh` before archinstall. After install, the machine
+JWT is written to `/etc/staka/machine.token` on the target root.
+
+Host-side smoke against a local org server (QEMU guest reaches host at
+`10.0.2.2`):
+
+```bash
+# optional HWID overrides when /sys/class/dmi/id is unreadable
+export STAKA_HWID_PRODUCT_UUID='aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+export STAKA_HWID_BOARD_SERIAL='QEMU-SN-1'
+export STAKA_HWID_PRODUCT_NAME='QEMU Standard PC'
+export STAKA_HWID_CPU_ID='QEMU Virtual CPU'
+
+./packages/image/configs/airootfs/root/staka-activate.sh \
+  --org-url http://127.0.0.1:8080 \
+  --code "$CODE" \
+  --hostname demo-box \
+  --flow admin \
+  --token-out /tmp/machine.token
+```
 
 ## Test
 
