@@ -71,4 +71,16 @@ describe("loadEnv", () => {
     expect(env.DATABASE_APP_URL).toContain("staka_app");
     expect(env.DATABASE_ADMIN_URL).toContain("staka_admin");
   });
+
+  test("trust proxy defaults off", () => {
+    const env = loadEnv(
+      {
+        NODE_ENV: "development",
+        DATABASE_URL: "postgres://x",
+        STAKA_JWT_KEYS: "[]",
+      },
+      { requireSecrets: true },
+    );
+    expect(env.TRUST_PROXY).toBe(false);
+  });
 });

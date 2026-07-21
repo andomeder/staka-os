@@ -18,9 +18,11 @@ const EnvSchema = z
     STAKA_JWT_KEYS: z.string().min(1).optional(),
     STAKA_AUTO_APPROVE: boolish.default(false),
     STAKA_AUTO_APPROVE_CONFIRM: boolish.default(false),
+    STAKA_AUTO_APPROVE_ACTOR_ID: z.string().uuid().optional(),
     STAKA_SEED_ADMIN_EMPLOYEE_ID: z.string().default("EMP-0001"),
     STAKA_SEED_ADMIN_PASSWORD: z.string().min(8).optional(),
     STAKA_SEED_ADMIN_DISPLAY_NAME: z.string().default("Staka Admin"),
+    TRUST_PROXY: boolish.default(false),
     LOG_LEVEL: z
       .enum(["fatal", "error", "warn", "info", "debug", "trace"])
       .default("info"),
@@ -44,9 +46,11 @@ const KNOWN_KEYS = [
   "STAKA_JWT_KEYS",
   "STAKA_AUTO_APPROVE",
   "STAKA_AUTO_APPROVE_CONFIRM",
+  "STAKA_AUTO_APPROVE_ACTOR_ID",
   "STAKA_SEED_ADMIN_EMPLOYEE_ID",
   "STAKA_SEED_ADMIN_PASSWORD",
   "STAKA_SEED_ADMIN_DISPLAY_NAME",
+  "TRUST_PROXY",
   "LOG_LEVEL",
 ] as const;
 

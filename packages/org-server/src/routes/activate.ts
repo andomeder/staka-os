@@ -49,6 +49,7 @@ export type ActivateDeps = {
   statusCache?: MachineStatusCache;
   autoApprove?: boolean;
   autoApproveActorId?: string;
+  trustProxy?: boolean;
 };
 
 function err(
@@ -63,6 +64,10 @@ function err(
   return c.json({ error, request_id: c.get("requestId"), ...extra }, status);
 }
 
+function requestIp(deps: ActivateDeps, headers: Headers): string {
+  return clientIp(headers, { trustProxy: deps.trustProxy === true });
+}
+
 export function activateRoutes(deps: ActivateDeps) {
   const app = new Hono();
   const statusCache = deps.statusCache ?? new MachineStatusCache();
@@ -72,7 +77,7 @@ export function activateRoutes(deps: ActivateDeps) {
   });
 
   app.post("/v1/activate/self/authenticate", async (c) => {
-    const ip = clientIp(c.req.raw.headers);
+    const ip = requestIp(deps, c.req.raw.headers);
     let body: unknown;
     try {
       body = await c.req.json();
@@ -139,7 +144,7 @@ export function activateRoutes(deps: ActivateDeps) {
   });
 
   app.post("/v1/activate/enroll", async (c) => {
-    const ip = clientIp(c.req.raw.headers);
+    const ip = requestIp(deps, c.req.raw.headers);
     let body: unknown;
     try {
       body = await c.req.json();
@@ -339,9 +344,29 @@ export function activateRoutes(deps: ActivateDeps) {
     );
   });
 
-  app.get("/v1/activate/status/:machine_id", async (c) => {
+  app.post("/v1/activate/status/:machine_id", async (c) => {
     const machineId = c.req.param("machine_id");
-    const code = c.req.query("code");
+    const ip = requestIp(deps, c.req.raw.headers);
+    const ipHit = deps.rateLimiters.statusIp.hit(`ip:${ip}`);
+    if (!ipHit.ok) {
+      c.header("Retry-After", String(ipHit.retryAfterSec));
+      return err(c, 429, "rate_limited");
+    }
+
+    let bodyIn: unknown;
+    try {
+      bodyIn = await c.req.json();
+    } catch {
+      return err(c, 400, "invalid_body");
+    }
+    const code =
+      typeof bodyIn === "object" &&
+      bodyIn !== null &&
+      "enrollment_code" in bodyIn &&
+      typeof (bodyIn as { enrollment_code: unknown }).enrollment_code ===
+        "string"
+        ? (bodyIn as { enrollment_code: string }).enrollment_code
+        : null;
     if (!code) return err(c, 401, "invalid_code");
 
     const codeHash = hashEnrollmentCode(code);
@@ -358,6 +383,11 @@ export function activateRoutes(deps: ActivateDeps) {
       .where(eq(activationCodes.id, machine.enrollmentCodeId))
       .limit(1);
     if (!boundCode || boundCode.codeHash !== codeHash) {
+      return err(c, 401, "invalid_code");
+    }
+    // Spent codes still authorize status polls for the bound machine (enroll
+    // already consumed uses). Revoked codes do not.
+    if (boundCode.revokedAt) {
       return err(c, 401, "invalid_code");
     }
 
@@ -394,7 +424,7 @@ export function activateRoutes(deps: ActivateDeps) {
 
     const { token, expiresAt } = await signJwt(
       deps.keyring,
-      { sub: result.machine.id },
+      { sub: result.machine.id, typ: "machine" },
       { expiresIn: MACHINE_JWT_TTL },
     );
 
@@ -422,6 +452,9 @@ export function activateRoutes(deps: ActivateDeps) {
 
     const machineId = typeof payload.sub === "string" ? payload.sub : null;
     if (!machineId) return err(c, 401, "unauthorized");
+    if (payload.typ === "self_provision") {
+      return err(c, 401, "unauthorized");
+    }
 
     let body: unknown = {};
     try {
@@ -434,10 +467,8 @@ export function activateRoutes(deps: ActivateDeps) {
     const parsed = HeartbeatRequest.safeParse(body ?? {});
     if (!parsed.success) return err(c, 400, "invalid_body");
 
-    // Always re-check DB when cache miss; on hit still allow revoke within TTL
-    // but force a DB read when cached status is active/approved by validating
-    // against DB if last cache write is stale is handled by TTL. For revoke
-    // tests, callers use a fresh statusCache.
+    // Cache is a hint only. Write path enforces status; revoked machines fail
+    // the UPDATE and return 403 even if cache still says approved/active.
     let status = statusCache.get(machineId);
     if (!status) {
       const [row] = await deps.dbApp
@@ -463,7 +494,6 @@ export function activateRoutes(deps: ActivateDeps) {
       parsed.data.metrics,
     );
     if (!updated) {
-      // likely revoked/suspended since cache write
       statusCache.invalidate(machineId);
       return err(c, 403, "forbidden");
     }

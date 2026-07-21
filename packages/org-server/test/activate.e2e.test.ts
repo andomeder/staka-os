@@ -137,7 +137,12 @@ describe("activate e2e", () => {
     );
 
     const statusPending = await app.request(
-      `/v1/activate/status/${enrollBody.machine_id}?code=${encodeURIComponent(plain)}`,
+      `/v1/activate/status/${enrollBody.machine_id}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enrollment_code: plain }),
+      },
     );
     expect(statusPending.status).toBe(200);
     const pendingBody = await statusPending.json();
@@ -152,7 +157,12 @@ describe("activate e2e", () => {
     expect(approved?.enrollmentNonce).toBeTruthy();
 
     const statusApproved = await app.request(
-      `/v1/activate/status/${enrollBody.machine_id}?code=${encodeURIComponent(plain)}`,
+      `/v1/activate/status/${enrollBody.machine_id}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enrollment_code: plain }),
+      },
     );
     const approvedBody = await statusApproved.json();
     expect(approvedBody.status).toBe("approved");
@@ -476,12 +486,17 @@ describe("activate e2e", () => {
     const { app } = await createTestApp({ pools });
     const res = await app.request(
       `/v1/activate/status/${crypto.randomUUID()}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({}),
+      },
     );
     expect(res.status).toBe(401);
   });
 
   test("heartbeat rejects revoked machine", async () => {
-    const { app, statusCache } = await createTestApp({ pools });
+    const { app } = await createTestApp({ pools });
     const admin = await seedAdmin();
     const staff = await seedStaff({ status: "invited" });
     const { plain } = await seedCode({
@@ -520,7 +535,7 @@ describe("activate e2e", () => {
     ).json();
 
     await revokeMachine(pools.app, enrollBody.machine_id);
-    statusCache.invalidate(enrollBody.machine_id);
+    // leave statusCache stale on purpose - write path must still 403
 
     const hb = await app.request("/v1/activate/heartbeat", {
       method: "POST",
@@ -532,4 +547,175 @@ describe("activate e2e", () => {
     });
     expect(hb.status).toBe(403);
   });
+
+  test("pending re-bind same user different code under staka_app", async () => {
+    const { app } = await createTestApp({ pools });
+    const admin = await seedAdmin();
+    const staff = await seedStaff({ status: "invited" });
+    const first = await seedCode({
+      userId: staff.id,
+      createdBy: admin.id,
+      flow: "admin",
+    });
+    const second = await seedCode({
+      userId: staff.id,
+      createdBy: admin.id,
+      flow: "admin",
+    });
+    const hw = hwidFixture(crypto.randomUUID());
+    const enroll1 = await (
+      await app.request("/v1/activate/enroll", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          enrollment_code: first.plain,
+          hardware_id: hw.hardware_id,
+          hwid_hash: hw.hwid_hash,
+          hwid_components: hw.components,
+          hostname: hw.hostname,
+          flow: "admin",
+        }),
+      })
+    ).json();
+
+    const enroll2Res = await app.request("/v1/activate/enroll", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        enrollment_code: second.plain,
+        hardware_id: hw.hardware_id,
+        hwid_hash: hw.hwid_hash,
+        hwid_components: hw.components,
+        hostname: `${hw.hostname}-rebind`,
+        flow: "admin",
+      }),
+    });
+    expect(enroll2Res.status).toBe(202);
+    const enroll2 = await enroll2Res.json();
+    expect(enroll2.machine_id).toBe(enroll1.machine_id);
+
+    const [row] = await pools.owner
+      .select()
+      .from(machines)
+      .where(eq(machines.id, enroll1.machine_id));
+    expect(row?.enrollmentCodeId).toBe(second.code.id);
+    expect(row?.hostname).toBe(`${hw.hostname}-rebind`);
+  });
+
+  test("auto-approve enroll returns approved", async () => {
+    const admin = await seedAdmin();
+    const staff = await seedStaff({ status: "invited" });
+    const { plain } = await seedCode({
+      userId: staff.id,
+      createdBy: admin.id,
+      flow: "admin",
+    });
+    const { app } = await createTestApp({
+      pools,
+      autoApprove: true,
+      autoApproveActorId: admin.id,
+    });
+    const hw = hwidFixture(crypto.randomUUID());
+    const res = await app.request("/v1/activate/enroll", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        enrollment_code: plain,
+        hardware_id: hw.hardware_id,
+        hwid_hash: hw.hwid_hash,
+        hwid_components: hw.components,
+        hostname: hw.hostname,
+        flow: "admin",
+      }),
+    });
+    expect(res.status).toBe(202);
+    const body = await res.json();
+    expect(body.status).toBe("approved");
+
+    const statusRes = await app.request(`/v1/activate/status/${body.machine_id}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enrollment_code: plain }),
+    });
+    const statusBody = await statusRes.json();
+    expect(statusBody.status).toBe("approved");
+    expect(statusBody.enrollment_nonce).toBeTruthy();
+  });
+
+  test("status rejects revoked enrollment code", async () => {
+    const { app } = await createTestApp({ pools });
+    const admin = await seedAdmin();
+    const staff = await seedStaff({ status: "invited" });
+    const { plain, code } = await seedCode({
+      userId: staff.id,
+      createdBy: admin.id,
+      flow: "admin",
+    });
+    const hw = hwidFixture(crypto.randomUUID());
+    const enrollBody = await (
+      await app.request("/v1/activate/enroll", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          enrollment_code: plain,
+          hardware_id: hw.hardware_id,
+          hwid_hash: hw.hwid_hash,
+          hwid_components: hw.components,
+          hostname: hw.hostname,
+          flow: "admin",
+        }),
+      })
+    ).json();
+
+    await pools.owner
+      .update(activationCodes)
+      .set({ revokedAt: new Date() })
+      .where(eq(activationCodes.id, code.id));
+
+    const statusRes = await app.request(
+      `/v1/activate/status/${enrollBody.machine_id}`,
+      {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enrollment_code: plain }),
+      },
+    );
+    expect(statusRes.status).toBe(401);
+  });
+
+  test("spoofed X-Forwarded-For does not bypass IP limiter", async () => {
+    const rateLimiters = createActivationRateLimiters();
+    rateLimiters.enrollIp = new RateLimiter(2, 60_000);
+    const { app } = await createTestApp({ pools, rateLimiters, trustProxy: false });
+    const admin = await seedAdmin();
+    const staff = await seedStaff({ status: "invited" });
+
+    const statuses: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const { plain } = await seedCode({
+        userId: staff.id,
+        createdBy: admin.id,
+        flow: "admin",
+      });
+      const hw = hwidFixture(crypto.randomUUID());
+      const res = await app.request("/v1/activate/enroll", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-forwarded-for": `198.51.100.${i + 1}`,
+        },
+        body: JSON.stringify({
+          enrollment_code: plain,
+          hardware_id: hw.hardware_id,
+          hwid_hash: hw.hwid_hash,
+          hwid_components: hw.components,
+          hostname: `spoof-${i}`,
+          flow: "admin",
+        }),
+      });
+      statuses.push(res.status);
+    }
+    expect(statuses[2]).toBe(429);
+  });
+
 });
