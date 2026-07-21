@@ -48,6 +48,8 @@ services:
       HOST: 0.0.0.0
       PORT: "8080"
       DATABASE_URL: postgres://staka@postgres:5432/staka
+      DATABASE_APP_URL: postgres://staka_app@postgres:5432/staka
+      DATABASE_ADMIN_URL: postgres://staka_admin@postgres:5432/staka
     depends_on:
       postgres:
         condition: service_healthy

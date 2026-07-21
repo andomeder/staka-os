@@ -114,6 +114,7 @@ export const machines = pgTable(
       .references(() => activationCodes.id),
     status: machineStatusEnum("status").notNull().default("pending"),
     enrollmentNonceHash: text("enrollment_nonce_hash"),
+    enrollmentNoncePlain: text("enrollment_nonce_plain"),
     provisionFlow: provisionFlowEnum("provision_flow").notNull(),
     firstSeenAt: ts("first_seen_at").notNull().defaultNow(),
     approvedAt: ts("approved_at"),

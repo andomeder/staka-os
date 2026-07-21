@@ -13,6 +13,8 @@ const EnvSchema = z
     PORT: z.coerce.number().int().positive().default(8080),
     HOST: z.string().default("0.0.0.0"),
     DATABASE_URL: z.string().min(1).optional(),
+    DATABASE_APP_URL: z.string().min(1).optional(),
+    DATABASE_ADMIN_URL: z.string().min(1).optional(),
     STAKA_JWT_KEYS: z.string().min(1).optional(),
     STAKA_AUTO_APPROVE: boolish.default(false),
     STAKA_AUTO_APPROVE_CONFIRM: boolish.default(false),
@@ -27,6 +29,8 @@ const EnvSchema = z
 
 export type Env = z.infer<typeof EnvSchema> & {
   DATABASE_URL: string;
+  DATABASE_APP_URL: string;
+  DATABASE_ADMIN_URL: string;
   STAKA_JWT_KEYS: string;
 };
 
@@ -35,6 +39,8 @@ const KNOWN_KEYS = [
   "PORT",
   "HOST",
   "DATABASE_URL",
+  "DATABASE_APP_URL",
+  "DATABASE_ADMIN_URL",
   "STAKA_JWT_KEYS",
   "STAKA_AUTO_APPROVE",
   "STAKA_AUTO_APPROVE_CONFIRM",
@@ -80,9 +86,12 @@ export function loadEnv(
     }
   }
 
+  const databaseUrl = parsed.DATABASE_URL ?? "";
   return {
     ...parsed,
-    DATABASE_URL: parsed.DATABASE_URL ?? "",
+    DATABASE_URL: databaseUrl,
+    DATABASE_APP_URL: parsed.DATABASE_APP_URL ?? databaseUrl,
+    DATABASE_ADMIN_URL: parsed.DATABASE_ADMIN_URL ?? databaseUrl,
     STAKA_JWT_KEYS: parsed.STAKA_JWT_KEYS ?? "",
   };
 }

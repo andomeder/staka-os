@@ -1,6 +1,6 @@
 import { execSync } from "node:child_process";
 import { migrate } from "drizzle-orm/postgres-js/migrator";
-import { createDb } from "../../src/db/client.ts";
+import { createDb, createDbPools, type DbPools } from "../../src/db/client.ts";
 
 export function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
@@ -38,7 +38,24 @@ export async function setupTestDb() {
   return { db, databaseUrl };
 }
 
-export function roleUrl(databaseUrl: string, role: "staka_app" | "staka_admin"): string {
+export async function setupTestPools(): Promise<{
+  pools: DbPools;
+  databaseUrl: string;
+}> {
+  const { db, databaseUrl } = await setupTestDb();
+  await db.$client.end({ timeout: 2 });
+  const pools = createDbPools({
+    owner: databaseUrl,
+    app: roleUrl(databaseUrl, "staka_app"),
+    admin: roleUrl(databaseUrl, "staka_admin"),
+  });
+  return { pools, databaseUrl };
+}
+
+export function roleUrl(
+  databaseUrl: string,
+  role: "staka_app" | "staka_admin",
+): string {
   const u = new URL(databaseUrl);
   u.username = role;
   u.password = "";
