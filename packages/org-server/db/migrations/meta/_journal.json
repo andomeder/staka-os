@@ -15,6 +15,13 @@
       "when": 1784616000000,
       "tag": "0001_enrollment_nonce_plain",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784617000000,
+      "tag": "0002_app_rebind_grants",
+      "breakpoints": true
     }
   ]
 }

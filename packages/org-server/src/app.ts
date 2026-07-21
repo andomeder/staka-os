@@ -1,8 +1,8 @@
 import { Hono } from "hono";
 import type { Db } from "./db/client.ts";
 import type { JwtKeyring } from "./lib/jwt.ts";
-import type { ActivationRateLimiters } from "./lib/rate-limit.ts";
 import { MachineStatusCache } from "./lib/machine-status-cache.ts";
+import type { ActivationRateLimiters } from "./lib/rate-limit.ts";
 import { requestId } from "./middleware/request-id.ts";
 import { activateRoutes } from "./routes/activate.ts";
 import { healthRoutes, type HealthDeps } from "./routes/health.ts";
@@ -18,6 +18,7 @@ export type AppDeps = HealthDeps & {
   statusCache?: MachineStatusCache;
   autoApprove?: boolean;
   autoApproveActorId?: string;
+  trustProxy?: boolean;
 };
 
 export function createApp(deps: AppDeps = {}) {
@@ -55,6 +56,9 @@ export function createApp(deps: AppDeps = {}) {
     }
     if (deps.autoApproveActorId !== undefined) {
       activateDeps.autoApproveActorId = deps.autoApproveActorId;
+    }
+    if (deps.trustProxy !== undefined) {
+      activateDeps.trustProxy = deps.trustProxy;
     }
     app.route("/", activateRoutes(activateDeps));
   }

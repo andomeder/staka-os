@@ -44,6 +44,7 @@ export type ActivationRateLimiters = {
   authIp: RateLimiter;
   authEmployee: RateLimiter;
   authCode: RateLimiter;
+  statusIp: RateLimiter;
 };
 
 export function createActivationRateLimiters(): ActivationRateLimiters {
@@ -55,16 +56,23 @@ export function createActivationRateLimiters(): ActivationRateLimiters {
     authIp: new RateLimiter(5, minute),
     authEmployee: new RateLimiter(5, minute),
     authCode: new RateLimiter(5, minute),
+    statusIp: new RateLimiter(30, minute),
   };
 }
 
-export function clientIp(headers: Headers, fallback = "unknown"): string {
-  const forwarded = headers.get("x-forwarded-for");
-  if (forwarded) {
-    const first = forwarded.split(",")[0]?.trim();
-    if (first) return first;
+export function clientIp(
+  headers: Headers,
+  opts: { trustProxy?: boolean; fallback?: string } = {},
+): string {
+  const fallback = opts.fallback ?? "unknown";
+  if (opts.trustProxy) {
+    const forwarded = headers.get("x-forwarded-for");
+    if (forwarded) {
+      const first = forwarded.split(",")[0]?.trim();
+      if (first) return first;
+    }
+    const realIp = headers.get("x-real-ip")?.trim();
+    if (realIp) return realIp;
   }
-  const realIp = headers.get("x-real-ip")?.trim();
-  if (realIp) return realIp;
   return fallback;
 }
