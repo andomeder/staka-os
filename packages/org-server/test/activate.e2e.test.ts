@@ -548,6 +548,75 @@ describe("activate e2e", () => {
     expect(hb.status).toBe(403);
   });
 
+  test("heartbeat rejects JWT without typ=machine", async () => {
+    const { app, keyring } = await createTestApp({ pools });
+    const admin = await seedAdmin();
+    const staff = await seedStaff({ status: "invited" });
+    const { plain } = await seedCode({
+      userId: staff.id,
+      createdBy: admin.id,
+      flow: "admin",
+    });
+    const hw = hwidFixture(crypto.randomUUID());
+    const enrollBody = await (
+      await app.request("/v1/activate/enroll", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          enrollment_code: plain,
+          hardware_id: hw.hardware_id,
+          hwid_hash: hw.hwid_hash,
+          hwid_components: hw.components,
+          hostname: hw.hostname,
+          flow: "admin",
+        }),
+      })
+    ).json();
+    const approved = await approveMachine(pools.app, {
+      machineId: enrollBody.machine_id,
+      approvedBy: admin.id,
+    });
+    await (
+      await app.request("/v1/activate/token", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          machine_id: enrollBody.machine_id,
+          enrollment_nonce: approved!.enrollmentNonce,
+        }),
+      })
+    ).json();
+
+    const { signJwt } = await import("../src/lib/jwt.ts");
+    const bare = await signJwt(
+      keyring,
+      { sub: enrollBody.machine_id },
+      { expiresIn: "30d" },
+    );
+    const selfTok = await signJwt(
+      keyring,
+      {
+        typ: "self_provision",
+        user_id: staff.id,
+        code_id: crypto.randomUUID(),
+        sub: enrollBody.machine_id,
+      },
+      { expiresIn: 900 },
+    );
+
+    for (const token of [bare.token, selfTok.token]) {
+      const hb = await app.request("/v1/activate/heartbeat", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({}),
+      });
+      expect(hb.status).toBe(401);
+    }
+  });
+
   test("pending re-bind same user different code under staka_app", async () => {
     const { app } = await createTestApp({ pools });
     const admin = await seedAdmin();
