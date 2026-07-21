@@ -1,4 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
+import { and, eq, isNull, lt, sql } from "drizzle-orm";
+import type { Db } from "../db/client.ts";
+import { activationCodes, type ActivationCode } from "../db/schema.ts";
 
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
@@ -34,4 +37,46 @@ export function generateNonce(): string {
 
 export function hashNonce(nonce: string): string {
   return createHash("sha256").update(nonce).digest("hex");
+}
+
+export async function findValidCodeByHash(
+  db: Db,
+  codeHash: string,
+  opts: { flow?: "admin" | "self" } = {},
+): Promise<ActivationCode | null> {
+  const [row] = await db
+    .select()
+    .from(activationCodes)
+    .where(
+      and(
+        eq(activationCodes.codeHash, codeHash),
+        isNull(activationCodes.revokedAt),
+        sql`${activationCodes.expiresAt} > now()`,
+        opts.flow ? eq(activationCodes.flow, opts.flow) : undefined,
+      ),
+    )
+    .limit(1);
+  if (!row) return null;
+  if (row.uses >= row.maxUses) return null;
+  return row;
+}
+
+/** Atomic use++ when still under max_uses and not expired/revoked. */
+export async function consumeEnrollmentCode(
+  db: Db,
+  codeId: string,
+): Promise<ActivationCode | null> {
+  const rows = await db
+    .update(activationCodes)
+    .set({ uses: sql`${activationCodes.uses} + 1` })
+    .where(
+      and(
+        eq(activationCodes.id, codeId),
+        isNull(activationCodes.revokedAt),
+        sql`${activationCodes.expiresAt} > now()`,
+        lt(activationCodes.uses, activationCodes.maxUses),
+      ),
+    )
+    .returning();
+  return rows[0] ?? null;
 }
