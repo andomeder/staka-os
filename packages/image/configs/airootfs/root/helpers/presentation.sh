@@ -1,6 +1,7 @@
-# Ensure we have gum available
+# gum is packaged into the live ISO; fail hard if it is missing.
 if ! command -v gum &>/dev/null; then
-  omarchy-pkg-add gum
+  echo "gum is required but not installed" >&2
+  exit 1
 fi
 
 # Get terminal size from /dev/tty (works in all scenarios: direct, sourced, or piped)
