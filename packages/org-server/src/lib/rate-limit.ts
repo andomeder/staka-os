@@ -45,6 +45,8 @@ export type ActivationRateLimiters = {
   authEmployee: RateLimiter;
   authCode: RateLimiter;
   statusIp: RateLimiter;
+  adminLoginIp: RateLimiter;
+  adminLoginEmployee: RateLimiter;
 };
 
 export function createActivationRateLimiters(): ActivationRateLimiters {
@@ -57,6 +59,8 @@ export function createActivationRateLimiters(): ActivationRateLimiters {
     authEmployee: new RateLimiter(5, minute),
     authCode: new RateLimiter(5, minute),
     statusIp: new RateLimiter(30, minute),
+    adminLoginIp: new RateLimiter(5, minute),
+    adminLoginEmployee: new RateLimiter(5, minute),
   };
 }
 

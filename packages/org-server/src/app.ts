@@ -1,10 +1,15 @@
 import { Hono } from "hono";
 import type { Db } from "./db/client.ts";
+import type { AdminSessionStore } from "./lib/admin-session.ts";
+import type { CsrfSigner } from "./lib/csrf.ts";
 import type { JwtKeyring } from "./lib/jwt.ts";
 import { MachineStatusCache } from "./lib/machine-status-cache.ts";
 import type { ActivationRateLimiters } from "./lib/rate-limit.ts";
 import { requestId } from "./middleware/request-id.ts";
 import { activateRoutes } from "./routes/activate.ts";
+import { adminRoutes } from "./routes/admin.ts";
+import { authRoutes } from "./routes/auth.ts";
+import { dashboardRoutes } from "./routes/dashboard.tsx";
 import { healthRoutes, type HealthDeps } from "./routes/health.ts";
 
 export type AppDeps = HealthDeps & {
@@ -13,12 +18,16 @@ export type AppDeps = HealthDeps & {
     error: (obj: unknown, msg?: string) => void;
   };
   dbApp?: Db;
+  dbAdmin?: Db;
   keyring?: JwtKeyring;
   rateLimiters?: ActivationRateLimiters;
   statusCache?: MachineStatusCache;
+  sessions?: AdminSessionStore;
+  csrf?: CsrfSigner;
   autoApprove?: boolean;
   autoApproveActorId?: string;
   trustProxy?: boolean;
+  secureCookies?: boolean;
 };
 
 export function createApp(deps: AppDeps = {}) {
@@ -61,6 +70,49 @@ export function createApp(deps: AppDeps = {}) {
       activateDeps.trustProxy = deps.trustProxy;
     }
     app.route("/", activateRoutes(activateDeps));
+
+    if (deps.sessions) {
+      const authDeps: Parameters<typeof authRoutes>[0] = {
+        dbApp: deps.dbApp,
+        keyring: deps.keyring,
+        sessions: deps.sessions,
+        rateLimiters: deps.rateLimiters,
+      };
+      if (deps.trustProxy !== undefined) {
+        authDeps.trustProxy = deps.trustProxy;
+      }
+      app.route("/", authRoutes(authDeps));
+    }
+
+    if (deps.sessions && deps.dbAdmin) {
+      app.route(
+        "/",
+        adminRoutes({
+          dbApp: deps.dbApp,
+          dbAdmin: deps.dbAdmin,
+          keyring: deps.keyring,
+          sessions: deps.sessions,
+        }),
+      );
+    }
+
+    if (deps.sessions && deps.dbAdmin && deps.csrf) {
+      const dashDeps: Parameters<typeof dashboardRoutes>[0] = {
+        dbApp: deps.dbApp,
+        dbAdmin: deps.dbAdmin,
+        keyring: deps.keyring,
+        sessions: deps.sessions,
+        csrf: deps.csrf,
+        rateLimiters: deps.rateLimiters,
+      };
+      if (deps.trustProxy !== undefined) {
+        dashDeps.trustProxy = deps.trustProxy;
+      }
+      if (deps.secureCookies !== undefined) {
+        dashDeps.secureCookies = deps.secureCookies;
+      }
+      app.route("/", dashboardRoutes(dashDeps));
+    }
   }
 
   app.get("/v1/config", (c) => c.json({}));

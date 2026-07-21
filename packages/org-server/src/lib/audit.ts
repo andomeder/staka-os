@@ -44,6 +44,8 @@ export async function appendAudit(
   return db.transaction(async (tx) => {
     await tx.execute(sql`select pg_advisory_xact_lock(${AUDIT_TIP_LOCK})`);
 
+    // Advisory lock above serializes tip reads. Avoid FOR UPDATE: app/admin
+    // roles are SELECT+INSERT only on admin_audit_log (no UPDATE privilege).
     const prevRows = await tx.execute<{
       id: string;
       actor_user_id: string;
@@ -58,7 +60,6 @@ export async function appendAudit(
       from admin_audit_log
       order by id desc
       limit 1
-      for update
     `);
 
     const prev = prevRows[0];
