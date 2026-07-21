@@ -1,7 +1,10 @@
 import { createHash } from "node:crypto";
-import { desc, eq, sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { adminAuditLog } from "../db/schema.ts";
+
+/** Transaction-scoped advisory lock key for the audit tip. */
+const AUDIT_TIP_LOCK = 872_314_001;
 
 export type AuditAppendInput = {
   actorUserId: string;
@@ -39,31 +42,39 @@ export async function appendAudit(
   input: AuditAppendInput,
 ): Promise<typeof adminAuditLog.$inferSelect> {
   return db.transaction(async (tx) => {
-    const [prev] = await tx
-      .select({
-        id: adminAuditLog.id,
-        actorUserId: adminAuditLog.actorUserId,
-        action: adminAuditLog.action,
-        targetType: adminAuditLog.targetType,
-        targetId: adminAuditLog.targetId,
-        payload: adminAuditLog.payload,
-        createdAt: adminAuditLog.createdAt,
-        prevHash: adminAuditLog.prevHash,
-      })
-      .from(adminAuditLog)
-      .orderBy(desc(adminAuditLog.id))
-      .limit(1);
+    await tx.execute(sql`select pg_advisory_xact_lock(${AUDIT_TIP_LOCK})`);
 
+    const prevRows = await tx.execute<{
+      id: string;
+      actor_user_id: string;
+      action: string;
+      target_type: string;
+      target_id: string;
+      payload: unknown;
+      created_at: Date | string;
+      prev_hash: string;
+    }>(sql`
+      select id, actor_user_id, action, target_type, target_id, payload, created_at, prev_hash
+      from admin_audit_log
+      order by id desc
+      limit 1
+      for update
+    `);
+
+    const prev = prevRows[0];
     const prevHash = prev
       ? rowHash({
-          id: prev.id,
-          actorUserId: prev.actorUserId,
+          id: Number(prev.id),
+          actorUserId: prev.actor_user_id,
           action: prev.action,
-          targetType: prev.targetType,
-          targetId: prev.targetId,
+          targetType: prev.target_type,
+          targetId: prev.target_id,
           payload: prev.payload,
-          createdAt: prev.createdAt,
-          prevHash: prev.prevHash,
+          createdAt:
+            prev.created_at instanceof Date
+              ? prev.created_at
+              : new Date(prev.created_at),
+          prevHash: prev.prev_hash,
         })
       : "0".repeat(64);
 

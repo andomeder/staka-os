@@ -1,5 +1,6 @@
 name: staka-org-server-prod
 
+# Deploy sketch only. Not runnable until the image supports migrate + *_FILE secrets.
 services:
   postgres:
     image: postgres:18-alpine
@@ -24,22 +25,6 @@ services:
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
 
-  migrate:
-    image: ghcr.io/andomeder/staka-org-server:latest
-    entrypoint: ["/usr/local/bin/staka-org-server"]
-    command: ["migrate"]
-    environment:
-      DATABASE_URL_FILE: /run/secrets/database_url
-    secrets:
-      - database_url
-    depends_on:
-      postgres:
-        condition: service_healthy
-    restart: "no"
-    read_only: true
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
-
   org-server:
     image: ghcr.io/andomeder/staka-org-server:latest
     ports:
@@ -56,13 +41,12 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
     read_only: true
     tmpfs:
       - /tmp
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
+    profiles: ["not-ready"]
 
 volumes:
   staka_pg_data:

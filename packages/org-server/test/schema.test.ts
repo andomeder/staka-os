@@ -261,4 +261,204 @@ describe("schema + grants", () => {
       await adminSql.end({ timeout: 1 });
     }
   });
+
+
+  test("unique hardware_id is enforced", async () => {
+    const passwordHash = await hashPassword("test-password-123");
+    const [user] = await ownerDb
+      .insert(users)
+      .values({
+        employeeId: `EMP-HW-${crypto.randomUUID().slice(0, 8)}`,
+        displayName: "HW User",
+        role: "staff",
+        status: "invited",
+      })
+      .returning();
+    const [admin] = await ownerDb
+      .insert(users)
+      .values({
+        employeeId: `EMP-HWA-${crypto.randomUUID().slice(0, 8)}`,
+        displayName: "HW Admin",
+        role: "admin",
+        status: "active",
+        passwordHash,
+      })
+      .returning();
+    const [code] = await ownerDb
+      .insert(activationCodes)
+      .values({
+        codeHash: hashEnrollmentCode(`STAKA-HW-${crypto.randomUUID().slice(0, 4)}`),
+        codeDisplay: "STAKA-HW…XXXX",
+        userId: user!.id,
+        createdBy: admin!.id,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        flow: "admin",
+      })
+      .returning();
+    const hardwareId = `hw-unique-${crypto.randomUUID()}`;
+    await ownerDb.insert(machines).values({
+      hardwareId,
+      hwidHash: "u".repeat(64),
+      hwidDisplay: "ProBook-***-0001",
+      hwidComponents: {
+        product_uuid: "33333333-3333-3333-3333-333333333333",
+        board_serial: "SN3",
+        product_name: "HP ProBook 440 G3",
+        cpu_id: "cpu3",
+      },
+      hostname: "lab-hw",
+      userId: user!.id,
+      enrollmentCodeId: code!.id,
+      provisionFlow: "admin",
+    });
+
+    let threw = false;
+    try {
+      await ownerDb.insert(machines).values({
+        hardwareId,
+        hwidHash: "v".repeat(64),
+        hwidDisplay: "ProBook-***-0002",
+        hwidComponents: {
+          product_uuid: "44444444-4444-4444-4444-444444444444",
+          board_serial: "SN4",
+          product_name: "HP ProBook 440 G3",
+          cpu_id: "cpu4",
+        },
+        hostname: "lab-hw-2",
+        userId: user!.id,
+        enrollmentCodeId: code!.id,
+        provisionFlow: "admin",
+      });
+    } catch {
+      threw = true;
+    }
+    expect(threw).toBe(true);
+  });
+
+  test("staka_app cannot UPDATE machines.hwid_components", async () => {
+    const passwordHash = await hashPassword("test-password-123");
+    const [user] = await ownerDb
+      .insert(users)
+      .values({
+        employeeId: `EMP-UP-${crypto.randomUUID().slice(0, 8)}`,
+        displayName: "Up User",
+        role: "staff",
+        status: "invited",
+      })
+      .returning();
+    const [admin] = await ownerDb
+      .insert(users)
+      .values({
+        employeeId: `EMP-UPA-${crypto.randomUUID().slice(0, 8)}`,
+        displayName: "Up Admin",
+        role: "admin",
+        status: "active",
+        passwordHash,
+      })
+      .returning();
+    const [code] = await ownerDb
+      .insert(activationCodes)
+      .values({
+        codeHash: hashEnrollmentCode(`STAKA-UP-${crypto.randomUUID().slice(0, 4)}`),
+        codeDisplay: "STAKA-UP…XXXX",
+        userId: user!.id,
+        createdBy: admin!.id,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        flow: "admin",
+      })
+      .returning();
+    const [machine] = await ownerDb
+      .insert(machines)
+      .values({
+        hardwareId: `hw-up-${crypto.randomUUID()}`,
+        hwidHash: "w".repeat(64),
+        hwidDisplay: "ProBook-***-5555",
+        hwidComponents: {
+          product_uuid: "55555555-5555-5555-5555-555555555555",
+          board_serial: "SN5",
+          product_name: "HP ProBook 440 G3",
+          cpu_id: "cpu5",
+        },
+        hostname: "lab-up",
+        userId: user!.id,
+        enrollmentCodeId: code!.id,
+        provisionFlow: "admin",
+      })
+      .returning();
+
+    const appSql = postgres(roleUrl(databaseUrl, "staka_app"), {
+      max: 1,
+      prepare: false,
+    });
+    try {
+      let blocked = false;
+      try {
+        await appSql`
+          update machines
+          set hwid_components = '{"x":"y"}'::jsonb
+          where id = ${machine!.id}
+        `;
+      } catch {
+        blocked = true;
+      }
+      expect(blocked).toBe(true);
+
+      await appSql`
+        update machines
+        set status = 'approved'
+        where id = ${machine!.id}
+      `;
+      const rows = await appSql`
+        select status from machines where id = ${machine!.id}
+      `;
+      expect(rows[0]?.status).toBe("approved");
+    } finally {
+      await appSql.end({ timeout: 1 });
+    }
+  });
+
+  test("staka_admin cannot UPDATE or DELETE admin_audit_log", async () => {
+    const passwordHash = await hashPassword("test-password-123");
+    const [admin] = await ownerDb
+      .insert(users)
+      .values({
+        employeeId: `EMP-AA-${crypto.randomUUID().slice(0, 8)}`,
+        displayName: "Audit Admin 2",
+        role: "admin",
+        status: "active",
+        passwordHash,
+      })
+      .returning();
+    const row = await appendAudit(ownerDb, {
+      actorUserId: admin!.id,
+      action: "probe",
+      targetType: "user",
+      targetId: admin!.id,
+    });
+
+    const adminSql = postgres(roleUrl(databaseUrl, "staka_admin"), {
+      max: 1,
+      prepare: false,
+    });
+    try {
+      let updateBlocked = false;
+      try {
+        await adminSql`update admin_audit_log set action = 'tamper' where id = ${row.id}`;
+      } catch {
+        updateBlocked = true;
+      }
+      expect(updateBlocked).toBe(true);
+
+      let deleteBlocked = false;
+      try {
+        await adminSql`delete from admin_audit_log where id = ${row.id}`;
+      } catch {
+        deleteBlocked = true;
+      }
+      expect(deleteBlocked).toBe(true);
+    } finally {
+      await adminSql.end({ timeout: 1 });
+    }
+  });
+
 });

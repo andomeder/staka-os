@@ -51,15 +51,5 @@ jobs:
         working-directory: packages/org-server
         run: bun run db:check
 
-      - name: Docker build check
-        run: docker build --check -f packages/org-server/Dockerfile .
-
-  docker-build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 25
-    needs: test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build org-server image
+      - name: Docker build
         run: docker build -f packages/org-server/Dockerfile -t staka-org-server:ci .

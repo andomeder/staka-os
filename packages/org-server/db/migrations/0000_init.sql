@@ -87,6 +87,22 @@ CREATE INDEX "machines_hwid_hash_idx" ON "machines" USING btree ("hwid_hash");--
 CREATE INDEX "usage_logs_machine_created_idx" ON "usage_logs" USING btree ("machine_id","created_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "users_employee_id_uidx" ON "users" USING btree ("employee_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "users_email_uidx" ON "users" USING btree ("email") WHERE "users"."email" IS NOT NULL;--> statement-breakpoint
+CREATE OR REPLACE FUNCTION staka_set_updated_at()
+RETURNS trigger AS $$
+BEGIN
+  NEW.updated_at = now();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+--> statement-breakpoint
+CREATE TRIGGER users_set_updated_at
+BEFORE UPDATE ON users
+FOR EACH ROW EXECUTE FUNCTION staka_set_updated_at();
+--> statement-breakpoint
+CREATE TRIGGER machines_set_updated_at
+BEFORE UPDATE ON machines
+FOR EACH ROW EXECUTE FUNCTION staka_set_updated_at();
+--> statement-breakpoint
 DO $$
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'staka_app') THEN
@@ -106,9 +122,11 @@ $$;
 --> statement-breakpoint
 GRANT USAGE ON SCHEMA public TO staka_app, staka_admin;
 --> statement-breakpoint
-GRANT SELECT, INSERT, UPDATE ON users, activation_codes, usage_logs TO staka_app;
+GRANT SELECT, INSERT, UPDATE ON users, activation_codes TO staka_app;
 --> statement-breakpoint
-GRANT INSERT, UPDATE ON machines TO staka_app;
+GRANT SELECT, INSERT ON usage_logs TO staka_app;
+--> statement-breakpoint
+GRANT INSERT ON machines TO staka_app;
 --> statement-breakpoint
 GRANT SELECT (
   id,
@@ -129,12 +147,28 @@ GRANT SELECT (
   updated_at
 ) ON machines TO staka_app;
 --> statement-breakpoint
+GRANT UPDATE (
+  hwid_hash,
+  hwid_display,
+  hostname,
+  status,
+  enrollment_nonce_hash,
+  approved_at,
+  approved_by,
+  last_heartbeat_at,
+  updated_at
+) ON machines TO staka_app;
+--> statement-breakpoint
 GRANT SELECT, INSERT ON admin_audit_log TO staka_app;
 --> statement-breakpoint
 REVOKE UPDATE, DELETE ON admin_audit_log FROM staka_app;
 --> statement-breakpoint
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO staka_app;
 --> statement-breakpoint
-GRANT SELECT, INSERT, UPDATE ON users, activation_codes, machines, usage_logs, admin_audit_log TO staka_admin;
+GRANT SELECT, INSERT, UPDATE ON users, activation_codes, machines, usage_logs TO staka_admin;
+--> statement-breakpoint
+GRANT SELECT, INSERT ON admin_audit_log TO staka_admin;
+--> statement-breakpoint
+REVOKE UPDATE, DELETE ON admin_audit_log FROM staka_admin;
 --> statement-breakpoint
 GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO staka_admin;

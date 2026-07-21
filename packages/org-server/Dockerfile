@@ -5,7 +5,7 @@ COPY package.json bun.lock ./
 COPY packages/protocol/package.json packages/protocol/
 COPY packages/org-server/package.json packages/org-server/
 
-RUN bun install --frozen-lockfile --production=false
+RUN bun install --frozen-lockfile
 
 FROM deps AS builder
 WORKDIR /app

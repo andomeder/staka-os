@@ -11,7 +11,7 @@ function randomBase32(bytes: number): string {
   return out;
 }
 
-/** STAKA-XXXX-XXXX-XXXX-XXXX from 32 bytes of entropy. */
+/** STAKA-XXXX-XXXX-XXXX-XXXX (~100 bits from 20 base32 chars). */
 export function generateEnrollmentCode(): string {
   const raw = randomBase32(20);
   const groups = raw.match(/.{1,4}/g) ?? [];
