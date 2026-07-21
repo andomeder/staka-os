@@ -299,7 +299,7 @@ if ! [[ $POLL_INTERVAL =~ ^[0-9]+$ ]] || ((POLL_INTERVAL < 1)); then
 fi
 
 echo "enrolled machine_id=$MACHINE_ID status=$STATUS poll=${POLL_INTERVAL}s"
-echo "note: enrollment code is consumed at enroll; if install fails later, admin must reissue a code or reset the machine enrollment"
+echo "note: enrollment code is consumed at enroll; if install fails later while pending, admin reissues a code (same HWID rebinds). approved/active/revoked stay hardware_id_bound - revoke does not free HWID"
 
 deadline=$((SECONDS + TIMEOUT_SEC))
 NONCE=""
@@ -342,7 +342,11 @@ done
 
 if [[ -z $NONCE ]]; then
   echo "timed out waiting for approval (last status=$STATUS)" >&2
-  echo "recovery: admin reissues enrollment code for this user; same HWID can re-enroll while pending" >&2
+  if [[ $STATUS == "pending" ]]; then
+    echo "recovery: still pending - admin can reissue a code; same HWID rebinds on enroll" >&2
+  else
+    echo "recovery: status=$STATUS binds this HWID; revoke does not free it - clear the machine row (owner DB) or use another HWID" >&2
+  fi
   exit 1
 fi
 
