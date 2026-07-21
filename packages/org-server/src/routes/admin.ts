@@ -3,7 +3,7 @@ import {
   CreateUserRequest,
   SetPasswordRequest,
 } from "@staka/protocol";
-import { and, desc, eq } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Db } from "../db/client.ts";
 import { appMachineColumns } from "../db/machine-columns.ts";
@@ -26,6 +26,7 @@ import {
   deactivateUser,
   getUserById,
   listUsers,
+  publicUserColumns,
   setUserPassword,
 } from "../lib/users.ts";
 import {
@@ -105,12 +106,7 @@ export function adminRoutes(deps: AdminRouteDeps) {
       .limit(50);
 
     const [user] = await deps.dbApp
-      .select({
-        id: users.id,
-        employeeId: users.employeeId,
-        displayName: users.displayName,
-        status: users.status,
-      })
+      .select(publicUserColumns)
       .from(users)
       .where(eq(users.id, machine.userId))
       .limit(1);
@@ -265,7 +261,7 @@ export function adminRoutes(deps: AdminRouteDeps) {
     const auth = c.get("adminAuth");
 
     const updated = await revokeMachine(deps.dbApp, id);
-    if (!updated) return err(c, 404, "not_found");
+    if (!updated) return err(c, 409, "not_revokable");
 
     await appendAudit(deps.dbApp, {
       actorUserId: auth.userId,
@@ -351,6 +347,8 @@ export function adminRoutes(deps: AdminRouteDeps) {
 
     const updated = await deactivateUser(deps.dbApp, id);
     if (!updated) return err(c, 404, "not_found");
+
+    deps.sessions.revokeUser(id);
 
     await appendAudit(deps.dbApp, {
       actorUserId: auth.userId,

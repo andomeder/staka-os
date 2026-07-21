@@ -1,18 +1,17 @@
 import { AdminLoginRequest } from "@staka/protocol";
 import { Hono } from "hono";
 import type { Db } from "../db/client.ts";
+import {
+  loginAdmin,
+  refreshAdminJwt,
+} from "../lib/admin-auth-tokens.ts";
 import type { AdminSessionStore } from "../lib/admin-session.ts";
 import { bearerToken, err } from "../lib/http.ts";
-import { signJwt, verifyJwt, type JwtKeyring } from "../lib/jwt.ts";
-import { verifyPassword } from "../lib/password.ts";
+import { verifyJwt, type JwtKeyring } from "../lib/jwt.ts";
 import {
   clientIp,
   type ActivationRateLimiters,
 } from "../lib/rate-limit.ts";
-import { getActiveAdminByEmployeeId } from "../lib/users.ts";
-
-const ADMIN_JWT_TTL = "8h";
-const ADMIN_JWT_TTL_SEC = 8 * 60 * 60;
 
 export type AuthDeps = {
   dbApp: Db;
@@ -51,35 +50,18 @@ export function authRoutes(deps: AuthDeps) {
       return err(c, 429, "rate_limited");
     }
 
-    const user = await getActiveAdminByEmployeeId(
-      deps.dbApp,
-      parsed.data.employee_id,
-    );
-    if (!user?.passwordHash) return err(c, 401, "invalid_credentials");
-    const ok = await verifyPassword(parsed.data.password, user.passwordHash);
-    if (!ok) return err(c, 401, "invalid_credentials");
-
-    const expiresAtSec = Math.floor(Date.now() / 1000) + ADMIN_JWT_TTL_SEC;
-    const jti = deps.sessions.create({
-      userId: user.id,
-      employeeId: user.employeeId,
-      expiresAt: expiresAtSec * 1000,
+    const minted = await loginAdmin({
+      db: deps.dbApp,
+      keyring: deps.keyring,
+      sessions: deps.sessions,
+      employeeId: parsed.data.employee_id,
+      password: parsed.data.password,
     });
-
-    const { token, expiresAt } = await signJwt(
-      deps.keyring,
-      {
-        sub: user.id,
-        role: "admin",
-        employee_id: user.employeeId,
-        jti,
-      },
-      { expiresIn: ADMIN_JWT_TTL },
-    );
+    if (!minted) return err(c, 401, "invalid_credentials");
 
     return c.json({
-      admin_jwt: token,
-      expires_at: expiresAt.toISOString(),
+      admin_jwt: minted.token,
+      expires_at: minted.expiresAt.toISOString(),
     });
   });
 
@@ -101,28 +83,19 @@ export function authRoutes(deps: AuthDeps) {
     const oldJti = typeof payload.jti === "string" ? payload.jti : null;
     if (!userId || !employeeId || !oldJti) return err(c, 401, "unauthorized");
 
-    const expiresAtSec = Math.floor(Date.now() / 1000) + ADMIN_JWT_TTL_SEC;
-    const newJti = deps.sessions.rotate(oldJti, {
+    const minted = await refreshAdminJwt({
+      db: deps.dbApp,
+      keyring: deps.keyring,
+      sessions: deps.sessions,
       userId,
       employeeId,
-      expiresAt: expiresAtSec * 1000,
+      oldJti,
     });
-    if (!newJti) return err(c, 401, "unauthorized");
-
-    const { token: next, expiresAt } = await signJwt(
-      deps.keyring,
-      {
-        sub: userId,
-        role: "admin",
-        employee_id: employeeId,
-        jti: newJti,
-      },
-      { expiresIn: ADMIN_JWT_TTL },
-    );
+    if (!minted) return err(c, 401, "unauthorized");
 
     return c.json({
-      admin_jwt: next,
-      expires_at: expiresAt.toISOString(),
+      admin_jwt: minted.token,
+      expires_at: minted.expiresAt.toISOString(),
     });
   });
 

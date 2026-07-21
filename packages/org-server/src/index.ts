@@ -3,6 +3,7 @@ import { createApp } from "./app.ts";
 import { checkDb, createDbPools } from "./db/client.ts";
 import { users } from "./db/schema.ts";
 import { loadEnv } from "./env.ts";
+import { AdminFlashStore } from "./lib/admin-flash.ts";
 import { AdminSessionStore } from "./lib/admin-session.ts";
 import { createCsrfSigner, csrfSecretFromJwtKeys } from "./lib/csrf.ts";
 import { loadKeyring } from "./lib/jwt.ts";
@@ -36,6 +37,7 @@ const pools = hasDb
 
 const keyring = hasJwt ? await loadKeyring(env.STAKA_JWT_KEYS) : undefined;
 const sessions = new AdminSessionStore();
+const flashes = new AdminFlashStore();
 const csrf = hasJwt
   ? createCsrfSigner(csrfSecretFromJwtKeys(env.STAKA_JWT_KEYS))
   : undefined;
@@ -63,6 +65,7 @@ const appDeps: Parameters<typeof createApp>[0] = {
   trustProxy: env.TRUST_PROXY,
   secureCookies: env.NODE_ENV === "production",
   sessions,
+  flashes,
 };
 if (autoApproveActorId) appDeps.autoApproveActorId = autoApproveActorId;
 if (hasDb) {

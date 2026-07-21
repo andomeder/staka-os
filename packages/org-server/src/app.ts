@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Db } from "./db/client.ts";
+import type { AdminFlashStore } from "./lib/admin-flash.ts";
 import type { AdminSessionStore } from "./lib/admin-session.ts";
 import type { CsrfSigner } from "./lib/csrf.ts";
 import type { JwtKeyring } from "./lib/jwt.ts";
@@ -23,6 +24,7 @@ export type AppDeps = HealthDeps & {
   rateLimiters?: ActivationRateLimiters;
   statusCache?: MachineStatusCache;
   sessions?: AdminSessionStore;
+  flashes?: AdminFlashStore;
   csrf?: CsrfSigner;
   autoApprove?: boolean;
   autoApproveActorId?: string;
@@ -96,13 +98,14 @@ export function createApp(deps: AppDeps = {}) {
       );
     }
 
-    if (deps.sessions && deps.dbAdmin && deps.csrf) {
+    if (deps.sessions && deps.dbAdmin && deps.csrf && deps.flashes) {
       const dashDeps: Parameters<typeof dashboardRoutes>[0] = {
         dbApp: deps.dbApp,
         dbAdmin: deps.dbAdmin,
         keyring: deps.keyring,
         sessions: deps.sessions,
         csrf: deps.csrf,
+        flashes: deps.flashes,
         rateLimiters: deps.rateLimiters,
       };
       if (deps.trustProxy !== undefined) {

@@ -54,7 +54,7 @@ export function MachinesPage(props: {
   flash?: string;
 }) {
   return (
-    <Layout title="Machines" employeeId={props.employeeId}>
+    <Layout title="Machines" employeeId={props.employeeId} csrf={props.csrf}>
       <div class="card">
         <h1>Machines</h1>
         {props.flash ? <div class="flash">{props.flash}</div> : null}
@@ -159,7 +159,11 @@ export function MachineDetailPage(props: {
   nonce?: string;
 }) {
   return (
-    <Layout title={props.machine.hostname} employeeId={props.employeeId}>
+    <Layout
+      title={props.machine.hostname}
+      employeeId={props.employeeId}
+      csrf={props.csrf}
+    >
       <div class="card">
         <div class="row" style="justify-content:space-between;">
           <h1>{props.machine.hostname}</h1>
@@ -246,6 +250,7 @@ export function MachineDetailPage(props: {
 
 export function UsersPage(props: {
   employeeId: string;
+  csrf?: string;
   users: Array<{
     id: string;
     employeeId: string;
@@ -256,7 +261,11 @@ export function UsersPage(props: {
   flash?: string;
 }) {
   return (
-    <Layout title="Users" employeeId={props.employeeId}>
+    <Layout
+      title="Users"
+      employeeId={props.employeeId}
+      {...(props.csrf ? { csrf: props.csrf } : {})}
+    >
       <div class="card">
         <div class="row" style="justify-content:space-between;">
           <h1>Users</h1>
@@ -298,7 +307,7 @@ export function NewUserPage(props: {
   error?: string;
 }) {
   return (
-    <Layout title="New user" employeeId={props.employeeId}>
+    <Layout title="New user" employeeId={props.employeeId} csrf={props.csrf}>
       <div class="card">
         <h1>Create user</h1>
         {props.error ? <div class="flash error">{props.error}</div> : null}
@@ -352,7 +361,7 @@ export function CodesPage(props: {
   createdCode?: string;
 }) {
   return (
-    <Layout title="Codes" employeeId={props.employeeId}>
+    <Layout title="Codes" employeeId={props.employeeId} csrf={props.csrf}>
       <div class="card">
         <h1>Enrollment codes</h1>
         {props.flash ? <div class="flash">{props.flash}</div> : null}

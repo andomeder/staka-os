@@ -1,7 +1,9 @@
 import type { MiddlewareHandler } from "hono";
+import type { Db } from "../db/client.ts";
 import type { AdminSessionStore } from "../lib/admin-session.ts";
 import { bearerToken, parseCookies } from "../lib/http.ts";
 import { verifyJwt, type JwtKeyring } from "../lib/jwt.ts";
+import { getActiveAdminById } from "../lib/users.ts";
 
 export type AdminAuth = {
   userId: string;
@@ -19,6 +21,7 @@ declare module "hono" {
 export type AdminAuthDeps = {
   keyring: JwtKeyring;
   sessions: AdminSessionStore;
+  dbApp: Db;
   cookieName?: string;
 };
 
@@ -95,6 +98,12 @@ async function resolveAdminToken(
 
   const session = deps.sessions.get(jti);
   if (!session || session.userId !== userId) return null;
+
+  const admin = await getActiveAdminById(deps.dbApp, userId);
+  if (!admin || admin.employeeId !== employeeId) {
+    deps.sessions.revoke(jti);
+    return null;
+  }
 
   return {
     userId,
