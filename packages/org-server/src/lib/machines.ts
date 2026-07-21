@@ -40,6 +40,26 @@ export async function approveMachine(
   return { machine: updated, enrollmentNonce: nonce };
 }
 
+export async function suspendMachine(
+  db: Db,
+  machineId: string,
+): Promise<AppMachine | null> {
+  const [updated] = await db
+    .update(machines)
+    .set({
+      status: "suspended",
+      enrollmentNoncePlain: null,
+    })
+    .where(
+      and(
+        eq(machines.id, machineId),
+        sql`${machines.status} in ('pending', 'approved', 'active')`,
+      ),
+    )
+    .returning(appMachineColumns);
+  return updated ?? null;
+}
+
 export async function revokeMachine(
   db: Db,
   machineId: string,

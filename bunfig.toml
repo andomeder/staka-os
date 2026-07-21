@@ -1,6 +1,10 @@
 [install]
 minimumReleaseAge = 604800
 
+[jsx]
+importSource = "hono/jsx"
+runtime = "automatic"
+
 # Optional supply-chain scan when SOCKET_API_KEY is configured:
 # [install.security]
 # scanner = "@socketsecurity/bun-security-scanner"
