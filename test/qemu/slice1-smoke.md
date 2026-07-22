@@ -95,7 +95,7 @@ Complete configurator disk/user steps and let archinstall run.
 
 After first boot of installed system (if time):
 
-- [ ] Heartbeat accepted with machine JWT
+- [ ] Heartbeat accepted with machine JWT (`POST /v1/activate/heartbeat`)
 - [ ] Admin dashboard / API shows machine `active`
 
 ## 6. Fallback paths (only if full install blocked)
