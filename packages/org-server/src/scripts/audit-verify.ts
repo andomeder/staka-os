@@ -1,15 +1,32 @@
+import { applySecretFiles, SECRET_ENV_NAMES } from "../lib/secrets.ts";
 import { createDb } from "../db/client.ts";
 import { verifyAuditChain } from "../lib/audit.ts";
 
-const databaseUrl = process.env.DATABASE_URL;
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL is required");
+export async function runAuditVerify(
+  env: Record<string, string | undefined> = process.env,
+): Promise<void> {
+  const resolved = applySecretFiles(env, SECRET_ENV_NAMES);
+  const databaseUrl = resolved.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error("DATABASE_URL is required");
+  }
+  const db = createDb(databaseUrl);
+  try {
+    const result = await verifyAuditChain(db);
+    if (!result.ok) {
+      console.error("audit chain broken", result);
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`audit chain ok (${result.checked} rows)`);
+  } finally {
+    await db.$client.end({ timeout: 2 });
+  }
 }
-const db = createDb(databaseUrl);
-const result = await verifyAuditChain(db);
-await db.$client.end({ timeout: 2 });
-if (!result.ok) {
-  console.error("audit chain broken", result);
-  process.exit(1);
+
+if (import.meta.main) {
+  runAuditVerify().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
 }
-console.log(`audit chain ok (${result.checked} rows)`);

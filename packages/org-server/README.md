@@ -40,12 +40,68 @@ Runtime uses dual-role pools: `DATABASE_APP_URL` (`staka_app`) for normal
 traffic and `DATABASE_ADMIN_URL` (`staka_admin`) for PII reads. Owner
 `DATABASE_URL` remains for migrate/seed.
 
-## Production compose
+## Binary commands
 
-`docker-compose.prod.yml` is a deploy sketch only. It is not runnable yet:
-the compiled binary has no `migrate` subcommand, secret `*_FILE` env vars are
-not loaded by the process, and migrations are not packaged into the runtime
-image. Use the dev compose path until the deploy work lands.
+The compiled image entrypoint is a multi-command binary:
+
+```
+staka-org-server                 # default: serve
+staka-org-server serve
+staka-org-server migrate
+staka-org-server seed            # refused in production unless STAKA_ALLOW_PROD_SEED=1
+staka-org-server audit-verify
+```
+
+Migrations are packaged at `/app/db/migrations` (override with
+`STAKA_MIGRATIONS_DIR`).
+
+## Secrets
+
+Secrets may be supplied as plain env vars or Docker-style files:
+
+| Env | File form |
+|---|---|
+| `DATABASE_URL` | `DATABASE_URL_FILE` |
+| `DATABASE_APP_URL` | `DATABASE_APP_URL_FILE` |
+| `DATABASE_ADMIN_URL` | `DATABASE_ADMIN_URL_FILE` |
+| `STAKA_JWT_KEYS` | `STAKA_JWT_KEYS_FILE` |
+| `STAKA_SEED_ADMIN_PASSWORD` | `STAKA_SEED_ADMIN_PASSWORD_FILE` |
+
+When `*_FILE` is set it wins. Missing files fail startup. Never log secret values.
+
+Production (`NODE_ENV=production`) requires distinct `DATABASE_APP_URL` and
+`DATABASE_ADMIN_URL`. Set `STAKA_ALLOW_SINGLE_DB_ROLE=1` only for constrained
+lab hosts.
+
+Behind Caddy or another reverse proxy, set `TRUST_PROXY=1` so rate limits use
+`X-Forwarded-For` / `X-Real-IP`. The proxy must overwrite those headers.
+
+## Production image
+
+```bash
+# from repo root
+docker build -f packages/org-server/Dockerfile -t staka-org-server .
+docker run --rm \
+  -e NODE_ENV=production \
+  -e TRUST_PROXY=1 \
+  -e DATABASE_URL_FILE=/run/secrets/database_url \
+  -e DATABASE_APP_URL_FILE=/run/secrets/database_app_url \
+  -e DATABASE_ADMIN_URL_FILE=/run/secrets/database_admin_url \
+  -e STAKA_JWT_KEYS_FILE=/run/secrets/staka_jwt_keys \
+  -v "$PWD/secrets/database_url:/run/secrets/database_url:ro" \
+  -v "$PWD/secrets/database_app_url:/run/secrets/database_app_url:ro" \
+  -v "$PWD/secrets/database_admin_url:/run/secrets/database_admin_url:ro" \
+  -v "$PWD/secrets/staka_jwt_keys:/run/secrets/staka_jwt_keys:ro" \
+  staka-org-server migrate
+docker run --rm -p 127.0.0.1:8080:8080 \
+  -e NODE_ENV=production \
+  -e TRUST_PROXY=1 \
+  # same secret mounts as above
+  staka-org-server serve
+```
+
+`docker-compose.prod.yml` is still a sketch for the packaging track; the binary
+now supports migrate, serve, and `*_FILE` secrets.
 
 ## Endpoints
 

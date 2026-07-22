@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { applySecretFiles, SECRET_ENV_NAMES } from "./lib/secrets.ts";
 
 const boolish = z
   .enum(["0", "1", "true", "false"])
@@ -22,6 +23,8 @@ const EnvSchema = z
     STAKA_SEED_ADMIN_EMPLOYEE_ID: z.string().default("EMP-0001"),
     STAKA_SEED_ADMIN_PASSWORD: z.string().min(8).optional(),
     STAKA_SEED_ADMIN_DISPLAY_NAME: z.string().default("Staka Admin"),
+    STAKA_ALLOW_SINGLE_DB_ROLE: boolish.default(false),
+    STAKA_MIGRATIONS_DIR: z.string().min(1).optional(),
     TRUST_PROXY: boolish.default(false),
     LOG_LEVEL: z
       .enum(["fatal", "error", "warn", "info", "debug", "trace"])
@@ -50,6 +53,8 @@ const KNOWN_KEYS = [
   "STAKA_SEED_ADMIN_EMPLOYEE_ID",
   "STAKA_SEED_ADMIN_PASSWORD",
   "STAKA_SEED_ADMIN_DISPLAY_NAME",
+  "STAKA_ALLOW_SINGLE_DB_ROLE",
+  "STAKA_MIGRATIONS_DIR",
   "TRUST_PROXY",
   "LOG_LEVEL",
 ] as const;
@@ -68,7 +73,8 @@ export function loadEnv(
   raw: Record<string, string | undefined> = process.env,
   opts: { requireSecrets?: boolean } = {},
 ): Env {
-  const parsed = EnvSchema.parse(pickKnown(raw));
+  const withSecrets = applySecretFiles(raw, SECRET_ENV_NAMES);
+  const parsed = EnvSchema.parse(pickKnown(withSecrets));
 
   if (parsed.STAKA_AUTO_APPROVE && parsed.NODE_ENV === "production") {
     throw new Error(
@@ -91,11 +97,30 @@ export function loadEnv(
   }
 
   const databaseUrl = parsed.DATABASE_URL ?? "";
+  const appUrl = parsed.DATABASE_APP_URL ?? databaseUrl;
+  const adminUrl = parsed.DATABASE_ADMIN_URL ?? databaseUrl;
+
+  if (parsed.NODE_ENV === "production" && requireSecrets) {
+    if (!parsed.DATABASE_APP_URL || !parsed.DATABASE_ADMIN_URL) {
+      throw new Error(
+        "production requires DATABASE_APP_URL and DATABASE_ADMIN_URL (or *_FILE)",
+      );
+    }
+    if (
+      appUrl === adminUrl &&
+      !parsed.STAKA_ALLOW_SINGLE_DB_ROLE
+    ) {
+      throw new Error(
+        "production requires distinct DATABASE_APP_URL and DATABASE_ADMIN_URL (set STAKA_ALLOW_SINGLE_DB_ROLE=1 to override)",
+      );
+    }
+  }
+
   return {
     ...parsed,
     DATABASE_URL: databaseUrl,
-    DATABASE_APP_URL: parsed.DATABASE_APP_URL ?? databaseUrl,
-    DATABASE_ADMIN_URL: parsed.DATABASE_ADMIN_URL ?? databaseUrl,
+    DATABASE_APP_URL: appUrl,
+    DATABASE_ADMIN_URL: adminUrl,
     STAKA_JWT_KEYS: parsed.STAKA_JWT_KEYS ?? "",
   };
 }
