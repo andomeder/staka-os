@@ -30,7 +30,8 @@ coverage/
 !.env.example
 *.pem
 *.key
-packages/org-server/secrets/
+packages/org-server/secrets/*
+!packages/org-server/secrets/*.example
 
 # Logs / temp
 *.log

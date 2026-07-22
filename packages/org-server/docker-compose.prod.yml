@@ -1,6 +1,14 @@
 name: staka-org-server-prod
 
-# Deploy sketch only. Not runnable until the image supports migrate + *_FILE secrets.
+# Local/host layout: put this file under /opt/staka-org-server/ with secrets/ (dir 0700).
+# Health probes are host-side (distroless image has no curl):
+#   curl -fsS http://127.0.0.1:8080/v1/health
+#   curl -fsS http://127.0.0.1:8080/v1/ready
+#
+# First bring-up: generate secrets (see scripts/gen-prod-secrets.sh), then:
+#   docker compose -f docker-compose.prod.yml up -d --build
+# Role passwords are applied once after migrate (see role-passwords).
+
 services:
   postgres:
     image: postgres:18-alpine
@@ -11,33 +19,31 @@ services:
     volumes:
       - staka_pg_data:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U \"$$(cat /run/secrets/postgres_user)\" -d staka"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U \"$$(cat /run/secrets/postgres_user)\" -d staka",
+        ]
       interval: 5s
       timeout: 5s
       retries: 20
+      start_period: 10s
     secrets:
       - postgres_user
       - postgres_password
-    read_only: true
-    tmpfs:
-      - /tmp
-      - /var/run/postgresql
-    cap_drop: [ALL]
-    security_opt: ["no-new-privileges:true"]
+    # Needs write + chown on the data volume; do not harden with read_only/cap_drop.
+    restart: unless-stopped
 
-  org-server:
+  migrate:
     image: ghcr.io/andomeder/staka-org-server:latest
-    ports:
-      - "127.0.0.1::8080"
+    build:
+      context: ../..
+      dockerfile: packages/org-server/Dockerfile
+    command: ["migrate"]
     environment:
-      HOST: 0.0.0.0
-      PORT: "8080"
-      NODE_ENV: production
       DATABASE_URL_FILE: /run/secrets/database_url
-      STAKA_JWT_KEYS_FILE: /run/secrets/staka_jwt_keys
     secrets:
       - database_url
-      - staka_jwt_keys
     depends_on:
       postgres:
         condition: service_healthy
@@ -46,7 +52,71 @@ services:
       - /tmp
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    profiles: ["not-ready"]
+    restart: "no"
+
+  # Migrations create LOGIN roles without passwords. Set them from secrets once
+  # after migrate so app/admin URLs can authenticate (scram).
+  role-passwords:
+    image: postgres:18-alpine
+    entrypoint: ["/bin/sh", "-ec"]
+    command:
+      - |
+        export PGPASSWORD="$$(cat /run/secrets/postgres_password)"
+        USER="$$(cat /run/secrets/postgres_user)"
+        APP_PW="$$(cat /run/secrets/staka_app_password)"
+        ADMIN_PW="$$(cat /run/secrets/staka_admin_password)"
+        APP_SQL="$$(printf '%s' "$$APP_PW" | sed "s/'/''/g")"
+        ADMIN_SQL="$$(printf '%s' "$$ADMIN_PW" | sed "s/'/''/g")"
+        psql -h postgres -U "$$USER" -d staka -v ON_ERROR_STOP=1 \
+          -c "ALTER ROLE staka_app WITH PASSWORD '$$APP_SQL';" \
+          -c "ALTER ROLE staka_admin WITH PASSWORD '$$ADMIN_SQL';"
+    secrets:
+      - postgres_user
+      - postgres_password
+      - staka_app_password
+      - staka_admin_password
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  org-server:
+    image: ghcr.io/andomeder/staka-org-server:latest
+    build:
+      context: ../..
+      dockerfile: packages/org-server/Dockerfile
+    command: ["serve"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8080"
+      NODE_ENV: production
+      TRUST_PROXY: "1"
+      DATABASE_URL_FILE: /run/secrets/database_url
+      DATABASE_APP_URL_FILE: /run/secrets/database_app_url
+      DATABASE_ADMIN_URL_FILE: /run/secrets/database_admin_url
+      STAKA_JWT_KEYS_FILE: /run/secrets/staka_jwt_keys
+    secrets:
+      - database_url
+      - database_app_url
+      - database_admin_url
+      - staka_jwt_keys
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+      role-passwords:
+        condition: service_completed_successfully
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+    # Distroless: no in-container curl. Probe from the host:
+    #   curl -fsS http://127.0.0.1:8080/v1/health
 
 volumes:
   staka_pg_data:
@@ -58,5 +128,13 @@ secrets:
     file: ./secrets/postgres_password
   database_url:
     file: ./secrets/database_url
+  database_app_url:
+    file: ./secrets/database_app_url
+  database_admin_url:
+    file: ./secrets/database_admin_url
   staka_jwt_keys:
     file: ./secrets/staka_jwt_keys
+  staka_app_password:
+    file: ./secrets/staka_app_password
+  staka_admin_password:
+    file: ./secrets/staka_admin_password
