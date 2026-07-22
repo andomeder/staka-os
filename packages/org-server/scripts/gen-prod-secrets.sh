@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Generate Docker secret files for docker-compose.prod.yml (local or /opt layout).
-# Does not print secret values. Overwrites files in SECRETS_DIR.
+# Does not print secret values. Refuses to overwrite existing files unless FORCE=1.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -11,6 +11,33 @@ PG_DB="${STAKA_PG_DB:-staka}"
 
 mkdir -p "$SECRETS_DIR"
 chmod 700 "$SECRETS_DIR"
+
+REQUIRED_FILES=(
+  postgres_user
+  postgres_password
+  staka_app_password
+  staka_admin_password
+  database_url
+  database_app_url
+  database_admin_url
+  staka_jwt_keys
+)
+
+existing=()
+for name in "${REQUIRED_FILES[@]}"; do
+  if [[ -e "$SECRETS_DIR/$name" ]]; then
+    existing+=("$name")
+  fi
+done
+
+if ((${#existing[@]} > 0)) && [[ "${FORCE:-0}" != "1" ]]; then
+  echo "Refusing to overwrite existing secret files under $SECRETS_DIR:" >&2
+  printf '  %s\n' "${existing[@]}" >&2
+  echo "Re-running would mint new DB/JWT secrets while an existing volume still" >&2
+  echo "has the old owner password (lockout). Set FORCE=1 only after you intend" >&2
+  echo "to rotate secrets and re-init or re-align the database." >&2
+  exit 1
+fi
 
 rand() {
   openssl rand -base64 32 | tr -d '\n' | tr '+/' '-_'
@@ -69,8 +96,9 @@ write() {
   local name="$1"
   local value="$2"
   local path="$SECRETS_DIR/$name"
-  printf '%s' "$value" >"$path"
-  chmod 644 "$path"
+  # umask so file is never world/group readable even briefly
+  (umask 077 && printf '%s' "$value" >"$path")
+  chmod 600 "$path"
 }
 
 write postgres_user "$PG_USER"
@@ -82,5 +110,5 @@ write database_app_url "postgres://staka_app:${APP_PW_ENC}@${PG_HOST}:5432/${PG_
 write database_admin_url "postgres://staka_admin:${ADMIN_PW_ENC}@${PG_HOST}:5432/${PG_DB}"
 write staka_jwt_keys "$JWT_JSON"
 
-echo "Wrote secret files under $SECRETS_DIR (mode 644; dir 0700). Values not printed."
+echo "Wrote secret files under $SECRETS_DIR (files mode 600; dir 0700). Values not printed."
 echo "Next: docker compose -f docker-compose.prod.yml up -d --build"
