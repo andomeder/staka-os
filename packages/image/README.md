@@ -64,25 +64,28 @@ Hostname validation matches `@staka/protocol` (`^[A-Za-z0-9-]{1,63}$`).
 Enrollment codes are consumed at `POST /v1/activate/enroll`. If activation
 succeeds and archinstall later fails:
 
-1. Do not reuse the spent code.
-2. If the machine is still `pending`: admin reissues a new code for the same
-   user (`bun run code:create` or `/admin`), then retry. Same HWID rebinds on
-   enroll while `pending`.
-3. If the machine is `approved` (nonce already issued/consumed), `active`,
+1. Prefer resume: keep `/root/machine.token` and `/root/staka-activation.json`.
+   Re-run the installer with the same org URL and hostname; `staka-activate.sh`
+   reuses local material after a successful heartbeat and does not re-enroll.
+2. Do not reuse a spent code for a fresh enroll.
+3. If the machine is still `pending` and you must re-enroll: admin reissues a
+   new code for the same user (`bun run code:create` or `/admin`). Same HWID
+   rebinds on enroll while `pending`.
+4. If the machine is `approved` (nonce already issued/consumed), `active`,
    `suspended`, or `revoked`: enroll returns `409 hardware_id_bound`. Revoke
    does not free `hardware_id`. There is no admin reset API yet - clear or
    reopen the row in the DB (owner) before a clean enroll, or use a different
    machine/HWID.
 
-Bare metal needs readable DMI (`/sys/class/dmi/id/*`). Synthetic HWID from
-`/etc/machine-id` is only for QEMU/host smoke when DMI is unavailable; prefer
-`STAKA_HWID_*` overrides in that case.
+Bare metal needs readable DMI (`/sys/class/dmi/id/*`). Missing product UUID
+fails closed. For lab/QEMU without DMI, set `STAKA_HWID_*` overrides (preferred)
+or `STAKA_ALLOW_SYNTHETIC_HWID=1` for a machine-id based synthetic id.
 
-Host-side smoke against a local org server (QEMU guest reaches host at
+Host-side client check against a local org server (QEMU guest reaches host at
 `10.0.2.2`):
 
 ```bash
-# optional HWID overrides when /sys/class/dmi/id is unreadable
+# required when /sys/class/dmi/id/product_uuid is unreadable
 export STAKA_HWID_PRODUCT_UUID='aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 export STAKA_HWID_BOARD_SERIAL='QEMU-SN-1'
 export STAKA_HWID_PRODUCT_NAME='QEMU Standard PC'
@@ -94,7 +97,7 @@ export STAKA_HWID_CPU_ID='QEMU Virtual CPU'
 ./packages/image/configs/airootfs/root/staka-activate.sh \
   --org-url http://127.0.0.1:8080 \
   --code "$CODE" \
-  --hostname demo-box \
+  --hostname lab-box \
   --flow admin \
   --token-out /tmp/machine.token
 ```

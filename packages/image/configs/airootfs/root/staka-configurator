@@ -416,6 +416,8 @@ done
 # STEP 4: ACTIVATE WITH ORG SERVER (before wiping disk / writing install JSON)
 step "Activating with org server..."
 
+printf '%s\n' "$org_url" >"$SCRIPT_DIR/staka_org_url.txt"
+
 activate_args=(
   --org-url "$org_url"
   --code "$enrollment_code"
@@ -438,10 +440,14 @@ unset STAKA_SELF_PASSWORD
 self_password=""
 
 if ((activate_rc != 0)); then
-  abort "Org activation failed. Check org URL, code, and network. Spent codes need admin reissue."
+  abort "Org activation failed. Check org URL, code, and network. If a previous run already wrote machine.token, keep it and retry install, or remove it only when forcing a fresh enroll. Spent codes need admin reissue while still pending."
 fi
 
-notice "Machine activated" 1
+if [[ -s $SCRIPT_DIR/machine.token ]]; then
+  notice "Machine activated" 1
+else
+  abort "Activation finished without machine.token"
+fi
 
 clear
 
