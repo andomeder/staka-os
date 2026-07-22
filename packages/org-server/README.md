@@ -21,7 +21,8 @@ export DATABASE_URL="postgres://staka@127.0.0.1:$(docker compose port postgres 5
 bun run db:migrate
 bun run db:seed
 bun run dev
-curl -s localhost:8080/v1/health
+# bare bun listens on PORT from .env (default 8080)
+curl -s "http://127.0.0.1:${PORT:-8080}/v1/health"
 ```
 
 Full containerized path (migrate then app):
@@ -112,7 +113,7 @@ docker push ghcr.io/andomeder/staka-org-server:latest
     staka_app_password      # used once by role-passwords init
     staka_admin_password
   backups/
-  .env                      # non-secret toggles only if needed
+  .env                      # non-secret toggles only (e.g. STAKA_ORG_HOST_PORT=18080)
 ```
 
 Shape-only examples live in `secrets/*.example`. Generate real files:
@@ -120,16 +121,23 @@ Shape-only examples live in `secrets/*.example`. Generate real files:
 ```bash
 cd packages/org-server
 ./scripts/gen-prod-secrets.sh
+# optional: pick a free loopback port if 18080 is taken
+export STAKA_ORG_HOST_PORT=18080
 docker compose -f docker-compose.prod.yml up -d --build
 # host probes (image is distroless; no in-container curl)
-curl -fsS http://127.0.0.1:8080/v1/health
-curl -fsS http://127.0.0.1:8080/v1/ready
+HOST_PORT=${STAKA_ORG_HOST_PORT:-18080}
+curl -fsS "http://127.0.0.1:${HOST_PORT}/v1/health"
+curl -fsS "http://127.0.0.1:${HOST_PORT}/v1/ready"
+# or: docker compose -f docker-compose.prod.yml port org-server 8080
 ```
 
 `docker-compose.prod.yml` runs: postgres → migrate (same image, `migrate`) →
 role-passwords (sets scram passwords on `staka_app` / `staka_admin`) →
 `org-server` (`serve`) with `NODE_ENV=production`, `TRUST_PROXY=1`, dual DB
-role secrets, JWT file secret, bind `127.0.0.1:8080`. Postgres is not published.
+role secrets, JWT file secret, bind `127.0.0.1:${STAKA_ORG_HOST_PORT:-18080}` →
+container `8080`. Postgres is not published. Dev compose already uses an
+ephemeral host port (`127.0.0.1::8080`). Caddy should reverse_proxy to the
+chosen host port, not a public `8080`.
 
 Single-container equivalent:
 
@@ -146,7 +154,7 @@ docker run --rm \
   -v "$PWD/secrets/database_admin_url:/run/secrets/database_admin_url:ro" \
   -v "$PWD/secrets/staka_jwt_keys:/run/secrets/staka_jwt_keys:ro" \
   staka-org-server migrate
-docker run --rm -p 127.0.0.1:8080:8080 \
+docker run --rm -p "127.0.0.1:${STAKA_ORG_HOST_PORT:-18080}:8080" \
   -e NODE_ENV=production \
   -e TRUST_PROXY=1 \
   # same secret mounts as above

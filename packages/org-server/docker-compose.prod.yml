@@ -1,9 +1,11 @@
 name: staka-org-server-prod
 
 # Local/host layout: put this file under /opt/staka-org-server/ with secrets/ (dir 0700).
-# Health probes are host-side (distroless image has no curl):
-#   curl -fsS http://127.0.0.1:8080/v1/health
-#   curl -fsS http://127.0.0.1:8080/v1/ready
+# Host port is STAKA_ORG_HOST_PORT (default 18080) so multi-project hosts and the VPS
+# do not fight over localhost:8080. Container listen port stays 8080.
+#   export STAKA_ORG_HOST_PORT=18080   # or any free high port
+#   curl -fsS http://127.0.0.1:${STAKA_ORG_HOST_PORT:-18080}/v1/health
+#   curl -fsS http://127.0.0.1:${STAKA_ORG_HOST_PORT:-18080}/v1/ready
 #
 # First bring-up: generate secrets (see scripts/gen-prod-secrets.sh), then:
 #   docker compose -f docker-compose.prod.yml up -d --build
@@ -87,7 +89,8 @@ services:
       dockerfile: packages/org-server/Dockerfile
     command: ["serve"]
     ports:
-      - "127.0.0.1:8080:8080"
+      # Host side only; change via STAKA_ORG_HOST_PORT. Never publish on 0.0.0.0.
+      - "127.0.0.1:${STAKA_ORG_HOST_PORT:-18080}:8080"
     environment:
       HOST: 0.0.0.0
       PORT: "8080"
@@ -116,7 +119,7 @@ services:
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     # Distroless: no in-container curl. Probe from the host:
-    #   curl -fsS http://127.0.0.1:8080/v1/health
+    #   curl -fsS http://127.0.0.1:${STAKA_ORG_HOST_PORT:-18080}/v1/health
 
 volumes:
   staka_pg_data:
