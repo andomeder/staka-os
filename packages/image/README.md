@@ -116,4 +116,4 @@ Contract fixture check (no server):
 ./test/qemu/boot-iso.sh /mnt/staka-media/images/staka-*.iso
 ```
 
-Manual end-to-end Flow A checklist: `test/qemu/slice1-smoke.md`.
+Manual end-to-end Flow A checklist: `test/qemu/install-checklist.md`.
