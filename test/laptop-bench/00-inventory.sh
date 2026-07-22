@@ -62,7 +62,7 @@ REPORT="$OUT/inventory-$TS.md"
 
 if [[ ! -f "$OUT/DECISION.md" ]]; then
   cat > "$OUT/DECISION.md" <<'EOF'
-# Slice 0 ProBook headless decision
+# ProBook headless decision
 
 Date (local):
 Machine: HP ProBook 440 G3

@@ -107,7 +107,7 @@ host builds from this tree instead of pulling GHCR first.
 ```
 /opt/staka-org-server/
   docker-compose.prod.yml
-  Caddyfile                 # Slice 1.5 deploy; optional locally
+  Caddyfile                 # reverse proxy on deploy host; optional locally
   secrets/                  # mode 0700 dir; secret files mode 600; never commit real secrets
     postgres_user
     postgres_password
