@@ -86,10 +86,30 @@ if grep -qE '^\s+\./configurator$' "$AUTOMATED"; then
   fail "automated_script still falls back to legacy configurator"
 fi
 
-# Fake HTTP hard-fail: reject --password argv immediately.
-if "$ACTIVATE" --password secret >/tmp/staka-activate-contract.out 2>&1; then
+# Reject --password argv immediately (no password-like sentinel literal).
+if "$ACTIVATE" --password argv-password-not-allowed >/tmp/staka-activate-contract.out 2>&1; then
   fail "activate accepted --password"
 fi
 grep -qi 'STAKA_SELF_PASSWORD' /tmp/staka-activate-contract.out || fail "password rejection message missing"
+
+# Synthetic HWID must be opt-in, not silent.
+grep -q 'STAKA_ALLOW_SYNTHETIC_HWID' "$ACTIVATE" || fail "synthetic HWID opt-in missing"
+if grep -q 'QEMU/headless fallback: stable synthetic' "$ACTIVATE"; then
+  fail "silent synthetic HWID fallback still present"
+fi
+
+# Resume path and stranded-state messaging.
+grep -q 'reusing existing activation material' "$ACTIVATE" || fail "resume path missing"
+grep -q 'stranded state' "$ACTIVATE" || fail "stranded-state messaging missing"
+grep -q '/v1/activate/heartbeat' "$ACTIVATE" || fail "heartbeat path missing for resume"
+
+# Legacy configurator must not install without org activation.
+if [[ -f $ROOT/packages/image/configs/airootfs/root/configurator ]]; then
+  if grep -q 'legacy configurator disabled' "$ROOT/packages/image/configs/airootfs/root/configurator"; then
+    :
+  else
+    fail "legacy configurator is not a fail-closed stub"
+  fi
+fi
 
 echo "activate-client-contract: ok"

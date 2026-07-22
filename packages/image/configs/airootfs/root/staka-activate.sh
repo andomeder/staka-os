@@ -21,6 +21,11 @@ Options:
 
 Flow B password:
   Set STAKA_SELF_PASSWORD in the environment (never pass on argv).
+
+HWID:
+  Prefer real DMI. When product UUID is missing, set STAKA_HWID_PRODUCT_UUID
+  (and usually the other STAKA_HWID_* fields). Synthetic machine-id fallback
+  requires STAKA_ALLOW_SYNTHETIC_HWID=1.
 EOF
 }
 
@@ -141,19 +146,32 @@ sha256_hex() {
   printf '%s' "$1" | openssl dgst -sha256 | awk '{print $NF}'
 }
 
-# Optional env overrides (host smoke / QEMU without DMI access). Live ISO runs as root.
+is_blank_dmi() {
+  local v="$1"
+  [[ -z $v || $v == "Not Specified" || $v == "None" || $v == "To be filled by O.E.M." || $v == "Default string" ]]
+}
+
+# Optional env overrides when DMI is unreadable (lab/QEMU). Live ISO runs as root.
 PRODUCT_UUID="${STAKA_HWID_PRODUCT_UUID:-$(read_dmi /sys/class/dmi/id/product_uuid)}"
 BOARD_SERIAL="${STAKA_HWID_BOARD_SERIAL:-$(read_dmi /sys/class/dmi/id/board_serial)}"
 PRODUCT_NAME="${STAKA_HWID_PRODUCT_NAME:-$(read_dmi /sys/class/dmi/id/product_name)}"
 CPU_ID="${STAKA_HWID_CPU_ID:-$(read_cpu_id)}"
 
-if [[ -z $PRODUCT_UUID || $PRODUCT_UUID == "Not Specified" || $PRODUCT_UUID == "None" ]]; then
-  # QEMU/headless fallback: stable synthetic uuid from machine-id + hostname
-  if [[ -r /etc/machine-id ]]; then
-    PRODUCT_UUID=$(sha256_hex "$(cat /etc/machine-id)-${HOSTNAME_VALUE}")
-    PRODUCT_UUID="${PRODUCT_UUID:0:8}-${PRODUCT_UUID:8:4}-${PRODUCT_UUID:12:4}-${PRODUCT_UUID:16:4}-${PRODUCT_UUID:20:12}"
+if is_blank_dmi "$PRODUCT_UUID"; then
+  if [[ -n ${STAKA_HWID_PRODUCT_UUID:-} ]]; then
+    PRODUCT_UUID="$STAKA_HWID_PRODUCT_UUID"
+  elif [[ ${STAKA_ALLOW_SYNTHETIC_HWID:-0} == "1" ]]; then
+    if [[ -r /etc/machine-id ]]; then
+      PRODUCT_UUID=$(sha256_hex "$(cat /etc/machine-id)-${HOSTNAME_VALUE}")
+      PRODUCT_UUID="${PRODUCT_UUID:0:8}-${PRODUCT_UUID:8:4}-${PRODUCT_UUID:12:4}-${PRODUCT_UUID:16:4}-${PRODUCT_UUID:20:12}"
+      echo "warning: using synthetic product_uuid (STAKA_ALLOW_SYNTHETIC_HWID=1)" >&2
+    else
+      echo "product_uuid unavailable and /etc/machine-id unreadable" >&2
+      exit 1
+    fi
   else
-    echo "product_uuid unavailable" >&2
+    echo "product_uuid unavailable from DMI" >&2
+    echo "set STAKA_HWID_PRODUCT_UUID (preferred) or STAKA_ALLOW_SYNTHETIC_HWID=1 for lab-only synthetic id" >&2
     exit 1
   fi
 fi
@@ -199,6 +217,69 @@ http_json() {
   HTTP_BODY=$(cat "$tmp" 2>/dev/null || true)
   rm -f "$tmp"
 }
+
+write_activation_material() {
+  local machine_jwt="$1"
+  local expires_at="$2"
+  local machine_id="$3"
+
+  umask 077
+  printf '%s\n' "$machine_jwt" >"$TOKEN_OUT"
+  chmod 600 "$TOKEN_OUT"
+
+  jq -nc \
+    --arg org_url "$ORG_URL" \
+    --arg machine_id "$machine_id" \
+    --arg hostname "$HOSTNAME_VALUE" \
+    --arg flow "$FLOW" \
+    --arg hardware_id "$HARDWARE_ID" \
+    --arg expires_at "$expires_at" \
+    --arg token_path "$TOKEN_OUT" \
+    '{
+      org_url:$org_url,
+      machine_id:$machine_id,
+      hostname:$hostname,
+      flow:$flow,
+      hardware_id:$hardware_id,
+      expires_at:$expires_at,
+      token_path:$token_path
+    }' >"$STATE_OUT"
+  chmod 600 "$STATE_OUT"
+
+  echo "wrote machine token to $TOKEN_OUT"
+  echo "wrote activation state to $STATE_OUT"
+}
+
+# Resume path: valid local token+state matching this org/hostname skips re-enroll.
+if [[ -s $TOKEN_OUT && -s $STATE_OUT ]]; then
+  resume_org=$(jq -r '.org_url // empty' "$STATE_OUT" 2>/dev/null || true)
+  resume_host=$(jq -r '.hostname // empty' "$STATE_OUT" 2>/dev/null || true)
+  resume_machine=$(jq -r '.machine_id // empty' "$STATE_OUT" 2>/dev/null || true)
+  resume_token=$(tr -d '\n' <"$TOKEN_OUT" 2>/dev/null || true)
+
+  if [[ -n $resume_token && $resume_org == "$ORG_URL" && $resume_host == "$HOSTNAME_VALUE" && -n $resume_machine ]]; then
+    tmp=$(mktemp)
+    curl_rc=0
+    code=$(
+      curl -sS -o "$tmp" -w '%{http_code}' \
+        -X POST \
+        -H 'Content-Type: application/json' \
+        -H 'Accept: application/json' \
+        -H "Authorization: Bearer $resume_token" \
+        --connect-timeout 10 \
+        --max-time 60 \
+        --data '{}' \
+        "$ORG_URL/v1/activate/heartbeat"
+    ) || curl_rc=$?
+    rm -f "$tmp"
+    if [[ $curl_rc -eq 0 && $code == "200" ]]; then
+      echo "reusing existing activation material for machine_id=$resume_machine (heartbeat ok)"
+      exit 0
+    fi
+    echo "existing token present but heartbeat failed (HTTP ${code:-?}); not reusing - remove $TOKEN_OUT to force re-enroll" >&2
+    exit 1
+  fi
+fi
 
 SELF_PROVISION_TOKEN=""
 if [[ $FLOW == "self" ]]; then
@@ -330,7 +411,13 @@ while ((SECONDS < deadline)); do
     break
   fi
   if [[ $STATUS == "active" ]]; then
-    echo "machine already active; no enrollment nonce" >&2
+    echo "machine already active with no enrollment nonce; cannot complete token exchange" >&2
+    echo "if a local machine.token already exists for this host, reuse it; otherwise clear or reopen the machine row (owner DB)" >&2
+    exit 1
+  fi
+  if [[ $STATUS == "approved" ]]; then
+    echo "machine approved but enrollment_nonce missing (likely already consumed)" >&2
+    echo "stranded state: HWID is bound and no JWT is local. Keep any existing $TOKEN_OUT, or clear/reopen the machine row (owner DB). Do not expect pending-style code reissue to free this HWID." >&2
     exit 1
   fi
   if [[ $STATUS == "revoked" || $STATUS == "suspended" ]]; then
@@ -344,6 +431,8 @@ if [[ -z $NONCE ]]; then
   echo "timed out waiting for approval (last status=$STATUS)" >&2
   if [[ $STATUS == "pending" ]]; then
     echo "recovery: still pending - admin can reissue a code; same HWID rebinds on enroll" >&2
+  elif [[ $STATUS == "approved" ]]; then
+    echo "recovery: approved without nonce - token may already be consumed; keep local token if present or clear machine row (owner DB)" >&2
   else
     echo "recovery: status=$STATUS binds this HWID; revoke does not free it - clear the machine row (owner DB) or use another HWID" >&2
   fi
@@ -356,41 +445,41 @@ token_body=$(
     --arg enrollment_nonce "$NONCE" \
     '{machine_id:$machine_id,enrollment_nonce:$enrollment_nonce}'
 )
-http_json POST "$ORG_URL/v1/activate/token" "$token_body"
+
+TOKEN_ATTEMPTS=0
+TOKEN_MAX_ATTEMPTS=4
+while ((TOKEN_ATTEMPTS < TOKEN_MAX_ATTEMPTS)); do
+  TOKEN_ATTEMPTS=$((TOKEN_ATTEMPTS + 1))
+  http_json POST "$ORG_URL/v1/activate/token" "$token_body"
+  if [[ ${HTTP_CURL_RC:-0} -ne 0 || -z $HTTP_CODE ]]; then
+    echo "token exchange transport failed (curl_rc=${HTTP_CURL_RC:-?}) attempt=${TOKEN_ATTEMPTS}/${TOKEN_MAX_ATTEMPTS}" >&2
+    sleep 2
+    continue
+  fi
+  if [[ $HTTP_CODE == "429" || $HTTP_CODE =~ ^5[0-9][0-9]$ ]]; then
+    echo "token exchange retryable (HTTP $HTTP_CODE) attempt=${TOKEN_ATTEMPTS}/${TOKEN_MAX_ATTEMPTS}" >&2
+    sleep 2
+    continue
+  fi
+  break
+done
+
 if [[ ${HTTP_CURL_RC:-0} -ne 0 || -z $HTTP_CODE ]]; then
-  echo "token exchange transport failed (curl_rc=${HTTP_CURL_RC:-?})" >&2
+  echo "token exchange transport failed after ${TOKEN_MAX_ATTEMPTS} attempts" >&2
+  echo "if the server consumed the nonce, this machine may be stranded without a local JWT" >&2
   exit 1
 fi
+
 if [[ $HTTP_CODE != "200" ]]; then
+  err_code=$(printf '%s' "$HTTP_BODY" | jq -r '.error // empty' 2>/dev/null || true)
   echo "token exchange failed (HTTP $HTTP_CODE): $HTTP_BODY" >&2
+  if [[ $HTTP_CODE == "410" || $err_code == "nonce_consumed" || $err_code == "nonce_invalid" ]]; then
+    echo "stranded state: enrollment nonce is gone and no machine JWT was written" >&2
+    echo "keep any existing local token, or clear/reopen the machine row (owner DB). Pending-style code reissue will not free an approved/bound HWID." >&2
+  fi
   exit 1
 fi
 
 MACHINE_JWT=$(printf '%s' "$HTTP_BODY" | jq -er '.machine_jwt')
 EXPIRES_AT=$(printf '%s' "$HTTP_BODY" | jq -er '.expires_at')
-
-umask 077
-printf '%s\n' "$MACHINE_JWT" >"$TOKEN_OUT"
-chmod 600 "$TOKEN_OUT"
-
-jq -nc \
-  --arg org_url "$ORG_URL" \
-  --arg machine_id "$MACHINE_ID" \
-  --arg hostname "$HOSTNAME_VALUE" \
-  --arg flow "$FLOW" \
-  --arg hardware_id "$HARDWARE_ID" \
-  --arg expires_at "$EXPIRES_AT" \
-  --arg token_path "$TOKEN_OUT" \
-  '{
-    org_url:$org_url,
-    machine_id:$machine_id,
-    hostname:$hostname,
-    flow:$flow,
-    hardware_id:$hardware_id,
-    expires_at:$expires_at,
-    token_path:$token_path
-  }' >"$STATE_OUT"
-chmod 600 "$STATE_OUT"
-
-echo "wrote machine token to $TOKEN_OUT"
-echo "wrote activation state to $STATE_OUT"
+write_activation_material "$MACHINE_JWT" "$EXPIRES_AT" "$MACHINE_ID"
