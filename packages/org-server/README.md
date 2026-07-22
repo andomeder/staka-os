@@ -90,12 +90,17 @@ GHCR image: `ghcr.io/andomeder/staka-org-server` (tags: full git sha, short sha,
 `org-server-v*` or workflow_dispatch. Manual push:
 
 ```bash
-docker build -f packages/org-server/Dockerfile -t ghcr.io/andomeder/staka-org-server:$(git rev-parse HEAD) .
-docker tag ghcr.io/andomeder/staka-org-server:$(git rev-parse HEAD) ghcr.io/andomeder/staka-org-server:latest
+SHA=$(git rev-parse HEAD)
+docker build -f packages/org-server/Dockerfile -t "ghcr.io/andomeder/staka-org-server:${SHA}" .
+docker tag "ghcr.io/andomeder/staka-org-server:${SHA}" ghcr.io/andomeder/staka-org-server:latest
 echo "$GHCR_TOKEN" | docker login ghcr.io -u andomeder --password-stdin
-docker push ghcr.io/andomeder/staka-org-server:$(git rev-parse HEAD)
+docker push "ghcr.io/andomeder/staka-org-server:${SHA}"
 docker push ghcr.io/andomeder/staka-org-server:latest
 ```
+
+On a VPS, pin the compose `image:` lines to the full sha (or digests) so deploys
+do not float on `:latest`. Local compose sets `pull_policy: build` so a clean
+host builds from this tree instead of pulling GHCR first.
 
 ### Host layout (`/opt/staka-org-server`)
 
@@ -103,7 +108,7 @@ docker push ghcr.io/andomeder/staka-org-server:latest
 /opt/staka-org-server/
   docker-compose.prod.yml
   Caddyfile                 # Slice 1.5 deploy; optional locally
-  secrets/                  # mode 0700 dir; files 644 for compose bind mounts; never commit real secrets
+  secrets/                  # mode 0700 dir; secret files mode 600; never commit real secrets
     postgres_user
     postgres_password
     database_url            # owner/migrate URL (postgres://staka:...@postgres:5432/staka)
@@ -116,11 +121,13 @@ docker push ghcr.io/andomeder/staka-org-server:latest
   .env                      # non-secret toggles only (e.g. STAKA_ORG_HOST_PORT=18080)
 ```
 
-Shape-only examples live in `secrets/*.example`. Generate real files:
+Shape-only examples live in `secrets/*.example`. Generate real files once:
 
 ```bash
 cd packages/org-server
 ./scripts/gen-prod-secrets.sh
+# refuses overwrite if secrets already exist (avoids DB lockout).
+# rotate deliberately: FORCE=1 ./scripts/gen-prod-secrets.sh
 # optional: pick a free loopback port if 18080 is taken
 export STAKA_ORG_HOST_PORT=18080
 docker compose -f docker-compose.prod.yml up -d --build

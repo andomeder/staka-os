@@ -9,6 +9,8 @@ name: staka-org-server-prod
 #
 # First bring-up: generate secrets (see scripts/gen-prod-secrets.sh), then:
 #   docker compose -f docker-compose.prod.yml up -d --build
+# Local default: build from this tree (pull_policy: build). On a VPS pin image
+# to a full git sha instead of :latest (see README).
 # Role passwords are applied once after migrate (see role-passwords).
 
 services:
@@ -41,6 +43,8 @@ services:
     build:
       context: ../..
       dockerfile: packages/org-server/Dockerfile
+    # Prefer local build over floating :latest from GHCR on a clean host.
+    pull_policy: build
     command: ["migrate"]
     environment:
       DATABASE_URL_FILE: /run/secrets/database_url
@@ -87,6 +91,7 @@ services:
     build:
       context: ../..
       dockerfile: packages/org-server/Dockerfile
+    pull_policy: build
     command: ["serve"]
     ports:
       # Host side only; change via STAKA_ORG_HOST_PORT. Never publish on 0.0.0.0.
