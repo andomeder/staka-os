@@ -20,6 +20,8 @@ Firmware paths used by the scripts:
 |---|---|
 | `boot-iso.sh <iso>` | ISO + disposable qcow2 disk |
 | `boot-iso-sata.sh <iso> <block-dev>` | Same, plus raw block device pass-through |
+| `activate-client-contract.sh` | Static client/protocol contract check |
+| `install-checklist.md` | Manual Flow A end-to-end install checklist |
 
 ```bash
 ./boot-iso.sh /path/to/staka.iso
@@ -58,9 +60,9 @@ lsblk -o NAME,SIZE,MODEL,SERIAL,TRAN,MOUNTPOINTS
 
 `boot-iso-sata.sh` requires an explicit `yes` confirmation before start.
 
-## Headless / serial smoke
+## Headless / serial boot
 
-The live image GRUB path is graphical. For automated serial checks, boot the kernel and initrd from the ISO with archiso params from the ISO boot config, for example:
+The live image GRUB path is graphical. For serial console checks, boot the kernel and initrd from the ISO with archiso params from the ISO boot config, for example:
 
 ```text
 archisobasedir=arch archisosearchuuid=<uuid-from-iso-grub> console=ttyS0,115200n8
