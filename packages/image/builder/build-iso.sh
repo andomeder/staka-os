@@ -131,7 +131,7 @@ echo "$NODE_SHA  $NODE_SRC" | sha256sum -c - || {
 mkdir -p "$build_cache_dir/airootfs/opt/packages/"
 cp "$NODE_SRC" "$build_cache_dir/airootfs/opt/packages/$NODE_FILENAME"
 
-arch_packages=(linux-t2 git gum jq openssl plymouth tzupdate omarchy-keyring lvm2 cryptsetup parted)
+arch_packages=(linux-t2 git gum jq openssl curl plymouth tzupdate omarchy-keyring lvm2 cryptsetup parted)
 printf '%s\n' "${arch_packages[@]}" >>"$build_cache_dir/packages.x86_64"
 
 mapfile -t all_packages < <(grep -v '^#' "$build_cache_dir/packages.x86_64" | grep -v '^$' || true)
