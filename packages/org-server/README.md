@@ -197,3 +197,44 @@ bun run code:create -- --employee-id EMP-0001 --flow admin
 - `STAKA_AUTO_APPROVE` requires a paired confirm flag and refuses production boot.
 - `bun run audit:verify` walks the admin audit forward hash-chain. Residual risk:
   DB superuser can rewrite history; no external tip is stored yet.
+
+## Database backups
+
+Prod backups run on the **host** (not inside the distroless app image).
+
+1. Import the backup **public** key into a host keyring (private key stays off the VPS).
+2. Copy `backup.env.example` to `backup.env`, set `BACKUP_KEY_ID` (fingerprint), paths, and optional `OFFSITE_DIR`.
+3. Run:
+
+```bash
+cd packages/org-server   # or your deploy checkout of this package
+./scripts/backup-db.sh
+```
+
+Output: `backups/staka-pg-YYYYMMDDThhmmssZ.sql.gpg` (encrypted only; no plaintext dump).
+Default retention deletes local (and `OFFSITE_DIR`) files older than `RETENTION_DAYS` (7).
+
+Optional daily timer (host):
+
+```bash
+# /etc/systemd/system/staka-org-backup.service  (Type=oneshot, ExecStart=.../backup-db.sh)
+# /etc/systemd/system/staka-org-backup.timer     (OnCalendar=daily)
+sudo systemctl enable --now staka-org-backup.timer
+```
+
+### Restore
+
+Decrypt-only check (no DB changes):
+
+```bash
+./scripts/restore-db.sh --input backups/staka-pg-TIMESTAMP.sql.gpg
+# optional: --write-sql /secure/path/restore.sql
+```
+
+Apply into the compose Postgres service (destructive; needs private key in `GNUPGHOME`):
+
+```bash
+RESTORE_CONFIRM=yes ./scripts/restore-db.sh --input backups/staka-pg-TIMESTAMP.sql.gpg --apply
+```
+
+Prefer restoring into a **new** empty database or a throwaway compose stack before touching a live volume. Practice cutover is a separate ops drill.
