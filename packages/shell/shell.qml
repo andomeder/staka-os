@@ -51,7 +51,7 @@ ShellRoot {
       layout: {
         left: [{ id: "staka.menu" }, { id: "staka.workspaces" }],
         center: [{ id: "staka.clock", format: "dddd HH:mm" }],
-        right: [{ id: "staka.audio" }]
+        right: [{ id: "staka.audio" }, { id: "staka.ai-panel" }]
       }
     },
     plugins: []

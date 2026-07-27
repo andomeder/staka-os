@@ -3,11 +3,13 @@
 `staka-shell` is a single long-running [Quickshell](https://quickshell.org/)
 instance that hosts the Staka desktop. Hyprland autostart launches one shell
 per graphical session; everything else — the bar, background switcher, panels,
-and overlays — runs **inside** the shell as a plugin.
+the AI assistant, and overlays — runs **inside** the shell as a plugin.
 
 This shell is a fork of the [Omarchy](https://github.com/basecamp/omarchy)
 Quickshell desktop (MIT). The plugin architecture, bar, launcher, panels, and
 shared UI kit are upstream Omarchy work, rebranded to Staka paths and ids.
+Staka-specific additions are the `staka.ai-panel` plugin, the
+`services/AgentClient.qml` transport, and the `bin/staka-*` IPC wrappers.
 
 Hosting everything inside one shell means:
 
@@ -25,7 +27,9 @@ shell/
   services/
     PluginRegistry.qml    discovers, validates plugins, looks up enabled state in shell.json
     BarWidgetRegistry.qml unified registry for bar widgets (1p + 3p)
+    AgentClient.qml       localhost HTTP/SSE client for the Staka agent daemon
   plugins/
+    ai-panel/             Staka assistant panel + bar button
     bar/                  first-party plugins (see plugins/README.md)
     launcher/
     menu/
@@ -43,6 +47,9 @@ shell/
     osd/
     lock/
     background/
+  bin/
+    staka-shell           IPC wrapper (forwards to the running shell)
+    staka-toggle-panel    Super+A handler; toggles staka.ai-panel
 ```
 
 The plugin discovery path is documented in [plugins/README.md](plugins/README.md).
@@ -61,7 +68,41 @@ If `STAKA_SHELL_PATH` is unset the shell falls back to the parent of its own
 directory, so a checkout launched in place works without the variable.
 
 Hyprland autostart launches the shell directly with `quickshell -p
-$STAKA_SHELL_PATH/shell`.
+$STAKA_SHELL_PATH/shell`. Bind Super+A to the assistant panel (Hyprland 0.56+
+Lua config):
+
+```lua
+-- see hyprland/staka-keybinds.conf.lua
+hyprland.bind("SUPER", "A", "exec", "staka-toggle-panel")
+```
+
+Put `shell/bin` on `PATH` (or use the absolute path to `staka-toggle-panel`).
+
+## The AI panel
+
+`plugins/ai-panel/` is the system-wide assistant. It is a `panel` + `bar-widget`
+plugin: the bar button shows agent health and toggles the panel; the panel
+streams chat from the local Staka agent daemon.
+
+The panel talks to the agent over localhost HTTP only (`127.0.0.1:7920`, no
+auth — the local user owns the process). It carries **no credentials** and
+never sees the machine token or org URLs; those stay inside the agent daemon.
+See `services/AgentClient.qml` for the transport and
+`packages/agent/src/api/routes.ts` for the endpoint contract:
+
+| Endpoint     | Shape                                                        |
+|--------------|--------------------------------------------------------------|
+| `GET /health`| `{ status, machine_id, org_name, model, skills_count, memory_entries }` |
+| `GET /skills`| `[ { name, description, source, path } ]`                    |
+| `POST /chat` | SSE stream; event `message`, data = JSON `AgentEvent`        |
+
+`AgentEvent` types: `text_delta`, `tool_call_start`, `tool_call_end`, `error`,
+`done`. The panel renders text deltas live, tool calls as inline chips, and a
+status bar with health, model, and org. A message beginning with `/name` is an
+explicit skill invocation passed through to the agent.
+
+The bar button health dot and the panel status bar poll `GET /health` every 10s:
+green = `ok`, yellow = unreachable, red = suspended/error.
 
 ## Plugin manifest
 
@@ -95,7 +136,7 @@ Supported `kinds`:
 | Kind         | What it is                                                   |
 |--------------|--------------------------------------------------------------|
 | `bar-widget` | A component that the active bar can drop into a section      |
-| `panel`      | A persistent or summoned floating window (e.g. OSD)          |
+| `panel`      | A persistent or summoned floating window (e.g. the AI panel) |
 | `overlay`    | A fullscreen overlay (e.g. background switcher)              |
 | `menu`       | A summoned menu surface                                      |
 | `service`    | A headless singleton, no UI                                  |
@@ -151,6 +192,16 @@ Direct invocation:
 quickshell ipc -p $STAKA_SHELL_PATH/shell call shell ping
 ```
 
+A convenience wrapper, [`bin/staka-shell`](bin/staka-shell), forwards IPC
+calls to the running shell. It does not start the shell.
+
+```
+staka-shell shell ping
+staka-shell shell toggle staka.ai-panel
+staka-shell shell listPlugins
+staka-shell shell rescanPlugins
+```
+
 **Note on `setPluginEnabled`:** the `enabled` argument is a string. Only the
 literal `"true"` enables the plugin; every other value (including `"True"`,
 `"1"`, `"yes"`, or omitted) disables it. This keeps the IPC surface
@@ -188,7 +239,7 @@ deep-merged back in.
     "layout": {
       "left":   [ { "id": "staka.menu" }, { "id": "staka.workspaces" } ],
       "center": [ { "id": "staka.clock", "format": "dddd HH:mm" } ],
-      "right":  [ { "id": "staka.audio" } ]
+      "right":  [ { "id": "staka.audio" }, { "id": "staka.ai-panel" } ]
     }
   },
   "plugins": []
@@ -220,8 +271,11 @@ deep-merged back in.
 
 ## Status and known gaps
 
-This is a working fork trimmed to the plugins the Staka desktop needs. Several
-inherited widgets call out to `staka-*` helper commands (`staka-shell`,
-`staka-menu`, `staka-notification-send`, and similar) that are not all shipped
-in this package yet; wiring the remaining helpers and a full desktop
-integration lands in a later slice.
+This is a working fork for the Staka AI panel. The panel and bar button are
+self-contained and only need the agent daemon on `127.0.0.1:7920`.
+
+Several inherited widgets call out to `staka-*` helper commands
+(`staka-shell`, `staka-menu`, `staka-notification-send`, and similar) that are
+not all shipped in this package yet. The AI panel does not depend on them; the
+bar toggle and panel IPC use `bin/staka-shell`, which is included. Remaining
+helper commands and a full desktop integration land in a later slice.

@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "staka.ai-panel",
+  "name": "Staka AI",
+  "version": "0.1.0",
+  "author": "Staka",
+  "description": "System-wide assistant panel backed by the local Staka agent daemon.",
+  "keepLoaded": true,
+  "kinds": ["panel", "bar-widget"],
+  "entryPoints": {
+    "panel": "AiPanel.qml",
+    "barWidget": "AiPanelButton.qml"
+  },
+  "barWidget": {
+    "displayName": "Staka AI",
+    "description": "Opens the assistant panel and shows agent health.",
+    "category": "Staka",
+    "allowMultiple": false,
+    "defaults": {},
+    "schema": {}
+  }
+}
