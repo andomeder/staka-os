@@ -24,10 +24,9 @@ describe("health routes", () => {
     expect(res.status).toBe(503);
   });
 
-  test("GET /v1/config stub returns empty object", async () => {
+  test("GET /v1/config is 404 without machine auth deps", async () => {
     const app = createApp();
     const res = await app.request("/v1/config");
-    expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({});
+    expect(res.status).toBe(404);
   });
 });

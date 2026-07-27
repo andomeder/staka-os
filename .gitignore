@@ -37,3 +37,4 @@ packages/org-server/secrets/*
 *.log
 tmp/
 .cache/
+.graphite_metadata.db
