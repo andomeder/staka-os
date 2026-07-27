@@ -7,9 +7,11 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage: staka-activate.sh --org-url URL --code CODE --hostname NAME --flow admin|self [options]
+       staka-activate.sh --discover-domain DOMAIN --code CODE --hostname NAME --flow admin|self [options]
 
 Options:
   --org-url URL              Org server base URL (http://host:port)
+  --discover-domain DOMAIN   Discover org URL via DNS TXT at _staka-org.DOMAIN
   --code CODE                Enrollment code
   --hostname NAME            Machine hostname
   --flow admin|self          Provision flow (default: admin)
@@ -30,6 +32,7 @@ EOF
 }
 
 ORG_URL=""
+DISCOVER_DOMAIN=""
 ENROLLMENT_CODE=""
 HOSTNAME_VALUE=""
 FLOW="admin"
@@ -43,6 +46,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
   --org-url)
     ORG_URL="${2:-}"
+    shift 2
+    ;;
+  --discover-domain)
+    DISCOVER_DOMAIN="${2:-}"
     shift 2
     ;;
   --code)
@@ -95,8 +102,40 @@ done
 
 PASSWORD="${STAKA_SELF_PASSWORD:-}"
 
+discover_org_url() {
+  local domain="$1"
+  local txt
+  txt=$(dig +short +time=3 +tries=1 TXT "_staka-org.${domain}" 2>/dev/null | head -1)
+  if [[ -z $txt ]]; then
+    return 1
+  fi
+  txt="${txt#\"}"
+  txt="${txt%\"}"
+  if [[ $txt =~ ^staka-org-url=(https?://[^[:space:]"]+)$ ]]; then
+    printf '%s' "${BASH_REMATCH[1]}"
+    return 0
+  fi
+  return 1
+}
+
+if [[ -z $ORG_URL && -n $DISCOVER_DOMAIN ]]; then
+  if ! command -v dig >/dev/null 2>&1; then
+    echo "dig is required for --discover-domain" >&2
+    exit 1
+  fi
+  echo "Discovering org server via DNS TXT _staka-org.${DISCOVER_DOMAIN} ..."
+  if discovered=$(discover_org_url "$DISCOVER_DOMAIN"); then
+    ORG_URL="$discovered"
+    echo "Discovered org URL: $ORG_URL"
+  else
+    echo "DNS TXT discovery failed for _staka-org.${DISCOVER_DOMAIN}" >&2
+    echo "Provide --org-url explicitly or check the TXT record." >&2
+    exit 2
+  fi
+fi
+
 if [[ -z $ORG_URL || -z $ENROLLMENT_CODE || -z $HOSTNAME_VALUE ]]; then
-  echo "org-url, code, and hostname are required" >&2
+  echo "org-url (or --discover-domain), code, and hostname are required" >&2
   usage >&2
   exit 2
 fi
