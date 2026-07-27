@@ -89,6 +89,16 @@ const STYLES = `
   }
   .flash.error { background: #fee2e2; color: #7f1d1d; }
   .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9rem; }
+  .copy-btn { padding: 2px 8px; font-size: 0.78rem; margin-left: 6px; }
+  .timeline { list-style: none; margin: 0; padding: 0 0 0 18px; border-left: 2px solid var(--line); }
+  .timeline li { position: relative; padding: 0 0 14px 14px; font-size: 0.92rem; }
+  .timeline li::before {
+    content: ''; position: absolute; left: -23px; top: 5px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--accent); border: 2px solid var(--card);
+  }
+  .timeline li.muted-dot::before { background: var(--muted); }
+  .timeline .tl-time { color: var(--muted); font-size: 0.82rem; }
   pre.box {
     background: #0f172a; color: #e2e8f0; padding: 12px; border-radius: 8px;
     overflow: auto; font-size: 0.85rem;
@@ -120,6 +130,7 @@ export function Layout(props: {
                 <a href="/admin">Machines</a>
                 <a href="/admin/users">Users</a>
                 <a href="/admin/codes">Codes</a>
+                <a href="/admin/reports/stale">Reports</a>
                 <span class="muted">{props.employeeId}</span>
                 <form class="inline" method="post" action="/admin/logout">
                   {props.csrf ? (

@@ -93,3 +93,17 @@ export async function listMachines(
     .from(machines)
     .orderBy(desc(machines.createdAt));
 }
+
+export async function listStaleMachines(db: Db) {
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  return db
+    .select(machineListColumns)
+    .from(machines)
+    .where(
+      and(
+        eq(machines.status, "active"),
+        or(isNull(machines.lastHeartbeatAt), lt(machines.lastHeartbeatAt, dayAgo)),
+      ),
+    )
+    .orderBy(machines.lastHeartbeatAt);
+}
