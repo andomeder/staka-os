@@ -27,6 +27,7 @@ export const AdminJwtClaims = z
     sub: z.string().uuid(),
     role: z.literal("admin"),
     employee_id: z.string().min(1),
+    jti: z.string().min(1),
     iat: z.number().int(),
     exp: z.number().int(),
     kid: z.string().min(1),

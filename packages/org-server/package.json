@@ -15,7 +15,8 @@
     "db:check": "drizzle-kit check",
     "db:seed": "bun src/db/seed.ts",
     "db:migrate:kit": "drizzle-kit migrate",
-    "audit:verify": "bun src/scripts/audit-verify.ts"
+    "audit:verify": "bun src/scripts/audit-verify.ts",
+    "code:create": "bun src/scripts/code-create.ts"
   },
   "dependencies": {
     "@hono/zod-openapi": "1.4.0",

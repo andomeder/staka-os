@@ -45,7 +45,7 @@ jobs:
           echo "DATABASE_URL=postgres://staka_test@127.0.0.1:${PORT}/staka_test" >> "$GITHUB_ENV"
 
       - name: Unit and integration tests
-        run: bun test packages/protocol packages/org-server
+        run: bun run test
 
       - name: drizzle-kit check
         working-directory: packages/org-server
