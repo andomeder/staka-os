@@ -1,104 +1,67 @@
-import { eq } from "drizzle-orm";
-import { createApp } from "./app.ts";
-import { checkDb, createDbPools } from "./db/client.ts";
-import { users } from "./db/schema.ts";
-import { loadEnv } from "./env.ts";
-import { AdminFlashStore } from "./lib/admin-flash.ts";
-import { AdminSessionStore } from "./lib/admin-session.ts";
-import { createCsrfSigner, csrfSecretFromJwtKeys } from "./lib/csrf.ts";
-import { loadKeyring } from "./lib/jwt.ts";
-import { createLogger } from "./lib/logger.ts";
-import { createActivationRateLimiters } from "./lib/rate-limit.ts";
+import {
+  parseCliCommand,
+  UnknownCliCommandError,
+} from "./cli.ts";
+import { runMigrate } from "./db/migrate.ts";
+import { runSeed } from "./db/seed.ts";
+import { applySecretFiles, SECRET_ENV_NAMES } from "./lib/secrets.ts";
+import { runAuditVerify } from "./scripts/audit-verify.ts";
+import { serve } from "./serve.ts";
 
-const env = loadEnv(process.env, {
-  requireSecrets:
-    process.env.NODE_ENV === "production" ||
-    process.env.STAKA_REQUIRE_SECRETS === "1",
-});
-const log = createLogger(env.LOG_LEVEL);
+async function main(): Promise<void> {
+  const command = parseCliCommand(process.argv);
 
-const hasDb = env.DATABASE_URL.length > 0;
-const hasJwt = env.STAKA_JWT_KEYS.length > 0;
-
-if (
-  (env.NODE_ENV === "production" || process.env.STAKA_REQUIRE_SECRETS === "1") &&
-  (!hasDb || !hasJwt)
-) {
-  throw new Error("DATABASE_URL and STAKA_JWT_KEYS are required");
-}
-
-const pools = hasDb
-  ? createDbPools({
-      owner: env.DATABASE_URL,
-      app: env.DATABASE_APP_URL,
-      admin: env.DATABASE_ADMIN_URL,
-    })
-  : undefined;
-
-const keyring = hasJwt ? await loadKeyring(env.STAKA_JWT_KEYS) : undefined;
-const sessions = new AdminSessionStore();
-const flashes = new AdminFlashStore();
-const csrf = hasJwt
-  ? createCsrfSigner(csrfSecretFromJwtKeys(env.STAKA_JWT_KEYS))
-  : undefined;
-
-let autoApproveActorId = env.STAKA_AUTO_APPROVE_ACTOR_ID;
-if (env.STAKA_AUTO_APPROVE) {
-  if (!autoApproveActorId && pools) {
-    const [admin] = await pools.owner
-      .select({ id: users.id })
-      .from(users)
-      .where(eq(users.employeeId, env.STAKA_SEED_ADMIN_EMPLOYEE_ID))
-      .limit(1);
-    autoApproveActorId = admin?.id;
-  }
-  if (!autoApproveActorId) {
-    throw new Error(
-      "STAKA_AUTO_APPROVE requires STAKA_AUTO_APPROVE_ACTOR_ID or a seeded admin matching STAKA_SEED_ADMIN_EMPLOYEE_ID",
-    );
+  switch (command) {
+    case "serve": {
+      const { app, server } = await serve();
+      // Keep handles reachable for tests / tooling that import this module.
+      Object.assign(globalThis, { __stakaApp: app, __stakaServer: server });
+      break;
+    }
+    case "migrate": {
+      const env = applySecretFiles(process.env, SECRET_ENV_NAMES);
+      const migrateOpts: { databaseUrl?: string; migrationsDir?: string } =
+        {};
+      if (env.DATABASE_URL) migrateOpts.databaseUrl = env.DATABASE_URL;
+      if (process.env.STAKA_MIGRATIONS_DIR) {
+        migrateOpts.migrationsDir = process.env.STAKA_MIGRATIONS_DIR;
+      }
+      await runMigrate(migrateOpts);
+      break;
+    }
+    case "seed": {
+      if (process.env.NODE_ENV === "production") {
+        if (process.env.STAKA_ALLOW_PROD_SEED !== "1") {
+          throw new Error(
+            "seed refused in production (set STAKA_ALLOW_PROD_SEED=1 to override)",
+          );
+        }
+      }
+      await runSeed(process.env);
+      break;
+    }
+    case "audit-verify": {
+      await runAuditVerify(process.env);
+      break;
+    }
+    default: {
+      const _exhaustive: never = command;
+      throw new Error(`unknown command: ${_exhaustive}`);
+    }
   }
 }
 
-const appDeps: Parameters<typeof createApp>[0] = {
-  logger: log,
-  autoApprove: env.STAKA_AUTO_APPROVE,
-  trustProxy: env.TRUST_PROXY,
-  secureCookies: env.NODE_ENV === "production",
-  sessions,
-  flashes,
-};
-if (autoApproveActorId) appDeps.autoApproveActorId = autoApproveActorId;
-if (hasDb) {
-  appDeps.checkDb = () => checkDb(env.DATABASE_APP_URL || env.DATABASE_URL);
-}
-if (pools) {
-  appDeps.dbApp = pools.app;
-  appDeps.dbAdmin = pools.admin;
-}
-if (keyring) appDeps.keyring = keyring;
-if (csrf) appDeps.csrf = csrf;
-if (keyring && pools) {
-  appDeps.rateLimiters = createActivationRateLimiters();
-}
-const app = createApp(appDeps);
+const isDirect =
+  import.meta.main ||
+  process.argv[1]?.endsWith("staka-org-server") === true ||
+  process.argv[1]?.endsWith("/index.ts") === true ||
+  process.argv[1]?.endsWith("\\index.ts") === true;
 
-const server = Bun.serve({
-  hostname: env.HOST,
-  port: env.PORT,
-  fetch: app.fetch,
-});
+if (isDirect) {
+  main().catch((err) => {
+    console.error(err instanceof Error ? err.message : err);
+    process.exit(err instanceof UnknownCliCommandError ? 2 : 1);
+  });
+}
 
-log.info(
-  {
-    host: server.hostname,
-    port: server.port,
-    env: env.NODE_ENV,
-    activation: Boolean(pools && keyring),
-    admin: Boolean(pools && keyring && sessions && csrf),
-    auto_approve: env.STAKA_AUTO_APPROVE,
-    trust_proxy: env.TRUST_PROXY,
-  },
-  "staka-org-server listening",
-);
-
-export { app, server };
+export { main, parseCliCommand, serve };

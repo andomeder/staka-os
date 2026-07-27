@@ -21,6 +21,8 @@ RUN bun build --compile --minify --sourcemap=none \
 FROM gcr.io/distroless/cc-debian12:nonroot AS runtime
 WORKDIR /
 COPY --from=builder /out/staka-org-server /usr/local/bin/staka-org-server
+COPY --from=builder /app/packages/org-server/db/migrations /app/db/migrations
 USER nonroot:nonroot
 EXPOSE 8080
+ENV STAKA_MIGRATIONS_DIR=/app/db/migrations
 ENTRYPOINT ["/usr/local/bin/staka-org-server"]
