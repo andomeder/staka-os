@@ -8,6 +8,7 @@ import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { loadSkills, type SourcedSkill } from "./skills/loader.ts";
 import { ensureOrgSkillSymlink } from "./skills/symlink.ts";
 import { shouldRunCurator, runCurator } from "./skills/curator.ts";
+import { getSnapshot } from "./memory/personal.ts";
 
 export type AgentState = {
   status: "starting" | "active" | "degraded" | "suspended";
@@ -32,13 +33,16 @@ export function createApp(state: AgentState, chat?: ChatConfig, skills?: Sourced
   const app = new Hono();
 
   app.get("/health", (c) => {
+    const snapshot = getSnapshot();
+    const memoryEntries = (snapshot.memory ? snapshot.memory.split("§").filter((e) => e.trim()).length : 0) +
+      (snapshot.user ? snapshot.user.split("§").filter((e) => e.trim()).length : 0);
     return c.json({
       status: state.status,
       machine_id: state.machineId,
       org_name: state.orgName,
       model: null,
       skills_count: skills?.length ?? 0,
-      memory_entries: 0,
+      memory_entries: memoryEntries,
       error: state.error,
     });
   });
