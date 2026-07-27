@@ -29,7 +29,7 @@ services:
       [
         "sh",
         "-c",
-        "if [ -f db/migrations/meta/_journal.json ]; then bun run db:migrate; else exit 0; fi",
+        "if [ -f db/migrations/meta/_journal.json ]; then bun src/db/migrate.ts; else exit 0; fi",
       ]
     depends_on:
       postgres:
