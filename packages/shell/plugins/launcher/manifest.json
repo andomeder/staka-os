@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "staka.launcher",
+  "name": "Launcher",
+  "version": "1.0.0",
+  "author": "Staka",
+  "description": "A Quickshell-powered launcher",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Launcher.qml"
+  }
+}

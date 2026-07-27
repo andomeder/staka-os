@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "staka.system-update",
+  "name": "Staka update",
+  "version": "1.0.0",
+  "author": "Staka",
+  "description": "Indicates available Staka updates",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "SystemUpdate.qml"
+  },
+  "barWidget": {
+    "displayName": "Staka update",
+    "description": "Indicates available Staka updates",
+    "category": "System",
+    "allowMultiple": false
+  }
+}
