@@ -13,12 +13,16 @@ const EnvSchema = z
     PORT: z.coerce.number().int().positive().default(8080),
     HOST: z.string().default("0.0.0.0"),
     DATABASE_URL: z.string().min(1).optional(),
+    DATABASE_APP_URL: z.string().min(1).optional(),
+    DATABASE_ADMIN_URL: z.string().min(1).optional(),
     STAKA_JWT_KEYS: z.string().min(1).optional(),
     STAKA_AUTO_APPROVE: boolish.default(false),
     STAKA_AUTO_APPROVE_CONFIRM: boolish.default(false),
+    STAKA_AUTO_APPROVE_ACTOR_ID: z.string().uuid().optional(),
     STAKA_SEED_ADMIN_EMPLOYEE_ID: z.string().default("EMP-0001"),
     STAKA_SEED_ADMIN_PASSWORD: z.string().min(8).optional(),
     STAKA_SEED_ADMIN_DISPLAY_NAME: z.string().default("Staka Admin"),
+    TRUST_PROXY: boolish.default(false),
     LOG_LEVEL: z
       .enum(["fatal", "error", "warn", "info", "debug", "trace"])
       .default("info"),
@@ -27,6 +31,8 @@ const EnvSchema = z
 
 export type Env = z.infer<typeof EnvSchema> & {
   DATABASE_URL: string;
+  DATABASE_APP_URL: string;
+  DATABASE_ADMIN_URL: string;
   STAKA_JWT_KEYS: string;
 };
 
@@ -35,12 +41,16 @@ const KNOWN_KEYS = [
   "PORT",
   "HOST",
   "DATABASE_URL",
+  "DATABASE_APP_URL",
+  "DATABASE_ADMIN_URL",
   "STAKA_JWT_KEYS",
   "STAKA_AUTO_APPROVE",
   "STAKA_AUTO_APPROVE_CONFIRM",
+  "STAKA_AUTO_APPROVE_ACTOR_ID",
   "STAKA_SEED_ADMIN_EMPLOYEE_ID",
   "STAKA_SEED_ADMIN_PASSWORD",
   "STAKA_SEED_ADMIN_DISPLAY_NAME",
+  "TRUST_PROXY",
   "LOG_LEVEL",
 ] as const;
 
@@ -80,9 +90,12 @@ export function loadEnv(
     }
   }
 
+  const databaseUrl = parsed.DATABASE_URL ?? "";
   return {
     ...parsed,
-    DATABASE_URL: parsed.DATABASE_URL ?? "",
+    DATABASE_URL: databaseUrl,
+    DATABASE_APP_URL: parsed.DATABASE_APP_URL ?? databaseUrl,
+    DATABASE_ADMIN_URL: parsed.DATABASE_ADMIN_URL ?? databaseUrl,
     STAKA_JWT_KEYS: parsed.STAKA_JWT_KEYS ?? "",
   };
 }
