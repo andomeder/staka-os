@@ -28,7 +28,7 @@ import {
   clientIp,
   type ActivationRateLimiters,
 } from "../lib/rate-limit.ts";
-import { listMachines } from "../lib/reports.ts";
+import { listMachines, listStaleMachines } from "../lib/reports.ts";
 import {
   createUser,
   getUserById,
@@ -46,6 +46,7 @@ import {
   MachineDetailPage,
   MachinesPage,
   NewUserPage,
+  StaleMachinesPage,
   UsersPage,
 } from "../views/pages.tsx";
 
@@ -607,6 +608,38 @@ export function dashboardRoutes(deps: DashboardDeps) {
       deps.flashes.set(auth.jti, { message: "revoked" });
     }
     return c.redirect("/admin/codes");
+  });
+
+  authed.get("/reports/stale", async (c) => {
+    const auth = c.get("adminAuth");
+    const csrf = mintCsrf(c);
+    const flash =
+      deps.flashes.take(auth.jti)?.message ??
+      sanitizeFlash(c.req.query("flash"));
+    const staleRows = await listStaleMachines(deps.dbApp);
+    const userRows = await listUsers(deps.dbApp);
+    const byId = new Map(userRows.map((u) => [u.id, u]));
+
+    return c.html(
+      <StaleMachinesPage
+        employeeId={auth.employeeId}
+        csrf={csrf}
+        {...(flash ? { flash } : {})}
+        machines={staleRows.map((m) => {
+          const u = byId.get(m.userId);
+          return {
+            id: m.id,
+            hostname: m.hostname,
+            userLabel: u
+              ? userLabel(u.employeeId, u.displayName)
+              : m.userId,
+            hwidDisplay: m.hwidDisplay,
+            lastHeartbeatAt: m.lastHeartbeatAt?.toISOString() ?? null,
+            firstSeenAt: m.firstSeenAt.toISOString(),
+          };
+        })}
+      />,
+    );
   });
 
   app.route("/admin", authed);

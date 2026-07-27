@@ -138,6 +138,41 @@ export function MachinesPage(props: {
   );
 }
 
+const EVENT_LABELS: Record<string, string> = {
+  activation_requested: "Enrollment requested",
+  activation_approved: "Approved",
+  activation_denied: "Denied",
+  nonce_issued: "Enrollment nonce issued",
+  token_issued: "Machine token issued",
+  admin_action: "Admin action",
+  admin_read_pii: "PII viewed",
+  user_authenticated_self_provision: "Self-provision auth",
+  config_pull: "Config pulled",
+};
+
+type TimelineEntry = { label: string; time: string; muted?: boolean };
+
+function buildTimeline(logs: Array<{ eventType: string; createdAt: string }>): TimelineEntry[] {
+  const heartbeats = logs.filter((l) => l.eventType === "heartbeat");
+  const others = logs.filter((l) => l.eventType !== "heartbeat");
+  const entries: TimelineEntry[] = others.map((l) => ({
+    label: EVENT_LABELS[l.eventType] ?? l.eventType,
+    time: l.createdAt,
+  }));
+  if (heartbeats.length > 0) {
+    const times = heartbeats.map((h) => h.createdAt).sort();
+    const first = times[0]!;
+    const last = times[times.length - 1]!;
+    const summary =
+      heartbeats.length === 1
+        ? `First heartbeat`
+        : `${heartbeats.length} heartbeats (${first} → ${last})`;
+    entries.push({ label: summary, time: first, muted: true });
+  }
+  entries.sort((a, b) => a.time.localeCompare(b.time));
+  return entries;
+}
+
 export function MachineDetailPage(props: {
   employeeId: string;
   csrf: string;
@@ -226,23 +261,22 @@ export function MachineDetailPage(props: {
         ) : null}
       </div>
       <div class="card">
-        <h2>Recent logs</h2>
-        <table>
-          <thead>
-            <tr>
-              <th>When</th>
-              <th>Event</th>
-            </tr>
-          </thead>
-          <tbody>
-            {props.logs.map((l) => (
-              <tr>
-                <td class="muted">{l.createdAt}</td>
-                <td>{l.eventType}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <h2>Activation timeline</h2>
+        {(() => {
+          const tl = buildTimeline(props.logs);
+          return tl.length === 0 ? (
+            <p class="muted">No activity recorded yet.</p>
+          ) : (
+            <ul class="timeline">
+              {tl.map((e) => (
+                <li class={e.muted ? "muted-dot" : undefined}>
+                  {e.label}
+                  <div class="tl-time">{e.time}</div>
+                </li>
+              ))}
+            </ul>
+          );
+        })()}
       </div>
     </Layout>
   );
@@ -368,10 +402,20 @@ export function CodesPage(props: {
         {props.createdCode ? (
           <div class="flash">
             New code (shown once):{" "}
-            <span class="mono">{props.createdCode}</span>
+            <span class="mono" id="new-code">{props.createdCode}</span>{" "}
+            <button
+              class="secondary copy-btn"
+              type="button"
+              onclick="navigator.clipboard.writeText(document.getElementById('new-code').textContent.trim());this.textContent='Copied'"
+            >
+              Copy
+            </button>
           </div>
         ) : null}
         <h2>Generate</h2>
+        {props.users.length === 0 ? (
+          <p class="muted">Create a user first before generating codes.</p>
+        ) : (
         <form class="stack" method="post" action="/admin/codes">
           <Csrf token={props.csrf} />
           <label>
@@ -395,9 +439,13 @@ export function CodesPage(props: {
           </label>
           <button type="submit">Generate code</button>
         </form>
+        )}
       </div>
       <div class="card">
         <h2>Existing</h2>
+        {props.codes.length === 0 ? (
+          <p class="muted">No enrollment codes yet.</p>
+        ) : (
         <table>
           <thead>
             <tr>
@@ -416,7 +464,9 @@ export function CodesPage(props: {
                 <td>{code.userLabel}</td>
                 <td>{code.flow}</td>
                 <td>
-                  {code.uses}/{code.maxUses}
+                  <span class={code.uses >= code.maxUses ? "badge revoked" : code.uses > 0 ? "badge approved" : "badge"}>
+                    {code.uses}/{code.maxUses}
+                  </span>
                 </td>
                 <td class="muted">{code.expiresAt}</td>
                 <td>
@@ -427,7 +477,7 @@ export function CodesPage(props: {
                       action={`/admin/codes/${code.id}/revoke`}
                     >
                       <Csrf token={props.csrf} />
-                      <button class="danger" type="submit">
+                      <button class="danger" type="submit" onclick="return confirm('Revoke this code? Machines already activated are not affected.')">
                         Revoke
                       </button>
                     </form>
@@ -439,8 +489,66 @@ export function CodesPage(props: {
             ))}
           </tbody>
         </table>
+        )}
       </div>
     </Layout>
   );
 }
 
+export function StaleMachinesPage(props: {
+  employeeId: string;
+  csrf: string;
+  machines: Array<{
+    id: string;
+    hostname: string;
+    userLabel: string;
+    hwidDisplay: string;
+    lastHeartbeatAt: string | null;
+    firstSeenAt: string;
+  }>;
+  flash?: string;
+}) {
+  return (
+    <Layout title="Stale machines" employeeId={props.employeeId} csrf={props.csrf}>
+      <div class="card">
+        <h1>Stale machines</h1>
+        <p class="muted">
+          Active machines with no heartbeat in the last 24 hours.
+        </p>
+        {props.flash ? <div class="flash">{props.flash}</div> : null}
+        <table>
+          <thead>
+            <tr>
+              <th>Hostname</th>
+              <th>User</th>
+              <th>HWID</th>
+              <th>Last heartbeat</th>
+              <th>First seen</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.machines.length === 0 ? (
+              <tr>
+                <td colspan={5} class="muted">
+                  No stale machines. All active machines have recent heartbeats.
+                </td>
+              </tr>
+            ) : (
+              props.machines.map((m) => (
+                <tr>
+                  <td>
+                    <a href={`/admin/machines/${m.id}`}>{m.hostname}</a>
+                  </td>
+                  <td>{m.userLabel}</td>
+                  <td class="mono">{m.hwidDisplay}</td>
+                  <td class="muted">{m.lastHeartbeatAt ?? "never"}</td>
+                  <td class="muted">{m.firstSeenAt}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Layout>
+  );
+}

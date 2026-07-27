@@ -20,7 +20,7 @@ import {
   revokeMachine,
   suspendMachine,
 } from "../lib/machines.ts";
-import { getReportsSummary, listMachines } from "../lib/reports.ts";
+import { getReportsSummary, listMachines, listStaleMachines } from "../lib/reports.ts";
 import {
   createUser,
   deactivateUser,
@@ -490,6 +490,25 @@ export function adminRoutes(deps: AdminRouteDeps) {
   app.get("/v1/admin/reports/summary", async (c) => {
     const summary = await getReportsSummary(deps.dbApp);
     return c.json(summary);
+  });
+
+  app.get("/v1/admin/reports/stale-machines", async (c) => {
+    const rows = await listStaleMachines(deps.dbApp);
+    return c.json({
+      machines: rows.map((m) => ({
+        id: m.id,
+        hostname: m.hostname,
+        status: m.status,
+        user_id: m.userId,
+        hardware_id: m.hardwareId,
+        hwid_display: m.hwidDisplay,
+        provision_flow: m.provisionFlow,
+        first_seen_at: m.firstSeenAt.toISOString(),
+        approved_at: m.approvedAt?.toISOString() ?? null,
+        last_heartbeat_at: m.lastHeartbeatAt?.toISOString() ?? null,
+        created_at: m.createdAt.toISOString(),
+      })),
+    });
   });
 
   app.get("/v1/admin/audit", async (c) => {

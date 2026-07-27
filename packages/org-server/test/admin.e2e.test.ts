@@ -6,6 +6,7 @@ import {
   activationCodes,
   adminAuditLog,
   machines,
+  usageLogs,
   users,
 } from "../src/db/schema.ts";
 import {
@@ -607,5 +608,236 @@ describe("admin api e2e", () => {
     const html = await follow.text();
     expect(html).toContain("New code (shown once)");
     expect(html).toContain("STAKA-");
+  });
+
+  test("stale machines API empty then with fixture", async () => {
+    const { app } = await createTestApp({ pools });
+    const { admin, password } = await seedAdmin();
+    const jwt = await login(app, admin.employeeId, password);
+
+    const beforeRes = await app.request("/v1/admin/reports/stale-machines", {
+      headers: authHeaders(jwt),
+    });
+    expect(beforeRes.status).toBe(200);
+    const beforeBody = (await beforeRes.json()) as {
+      machines: Array<{ id: string }>;
+    };
+    expect(Array.isArray(beforeBody.machines)).toBe(true);
+    const beforeCount = beforeBody.machines.length;
+
+    const [staff] = await pools.owner
+      .insert(users)
+      .values({
+        employeeId: `EMP-STALE-${crypto.randomUUID().slice(0, 8)}`,
+        displayName: "Stale Target",
+        role: "staff",
+        status: "invited",
+      })
+      .returning();
+
+    const plain1 = generateEnrollmentCode();
+    const [code1] = await pools.owner
+      .insert(activationCodes)
+      .values({
+        codeHash: hashEnrollmentCode(plain1),
+        codeDisplay: maskEnrollmentCode(plain1),
+        userId: staff!.id,
+        createdBy: admin.id,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        maxUses: 1,
+        flow: "admin",
+      })
+      .returning();
+
+    const hw = hwidFixture(crypto.randomUUID());
+    await pools.owner.insert(machines).values({
+      hardwareId: hw.hardware_id,
+      hwidHash: hw.hwid_hash,
+      hwidDisplay: `${hw.components.product_name}-***-test`,
+      hwidComponents: hw.components,
+      hostname: hw.hostname,
+      userId: staff!.id,
+      enrollmentCodeId: code1!.id,
+      status: "active",
+      provisionFlow: "admin",
+      lastHeartbeatAt: new Date(Date.now() - 25 * 60 * 60 * 1000),
+    });
+
+    const staleRes = await app.request("/v1/admin/reports/stale-machines", {
+      headers: authHeaders(jwt),
+    });
+    expect(staleRes.status).toBe(200);
+    const staleBody = (await staleRes.json()) as {
+      machines: Array<{ hostname: string; status: string }>;
+    };
+    expect(staleBody.machines.length).toBeGreaterThanOrEqual(1);
+    const found = staleBody.machines.find((m) => m.hostname === hw.hostname);
+    expect(found).toBeTruthy();
+    expect(found!.status).toBe("active");
+  });
+
+  test("dashboard stale page renders and escapes XSS hostname", async () => {
+    const { app } = await createTestApp({ pools });
+    const { admin, password } = await seedAdmin();
+
+    const loginPage = await app.request("/admin/login");
+    const loginHtml = await loginPage.text();
+    const csrf = loginHtml.match(/name="csrf" value="([^"]+)"/)?.[1];
+    expect(csrf).toBeTruthy();
+    const cookies1 = parseSetCookies(loginPage);
+
+    const loginPost = await app.request("/admin/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `csrf=${encodeURIComponent(csrf!)}`,
+      },
+      body: new URLSearchParams({
+        csrf: csrf!,
+        employee_id: admin.employeeId,
+        password,
+      }).toString(),
+      redirect: "manual",
+    });
+    const cookies2 = parseSetCookies(loginPost);
+    const sessionCookie = `staka_admin=${encodeURIComponent(cookies2.staka_admin)}; csrf=${encodeURIComponent(cookies2.csrf ?? csrf!)}`;
+
+    const [staff] = await pools.owner
+      .insert(users)
+      .values({
+        employeeId: `EMP-STALEPG-${crypto.randomUUID().slice(0, 8)}`,
+        displayName: "Stale Page Target",
+        role: "staff",
+        status: "invited",
+      })
+      .returning();
+
+    const plain2 = generateEnrollmentCode();
+    const [code2] = await pools.owner
+      .insert(activationCodes)
+      .values({
+        codeHash: hashEnrollmentCode(plain2),
+        codeDisplay: maskEnrollmentCode(plain2),
+        userId: staff!.id,
+        createdBy: admin.id,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        maxUses: 1,
+        flow: "admin",
+      })
+      .returning();
+
+    const xssHost = '<img src=x onerror=alert(1)>-stale';
+    const hw = hwidFixture(crypto.randomUUID());
+    await pools.owner.insert(machines).values({
+      hardwareId: hw.hardware_id,
+      hwidHash: hw.hwid_hash,
+      hwidDisplay: `${hw.components.product_name}-***-xss`,
+      hwidComponents: hw.components,
+      hostname: xssHost,
+      userId: staff!.id,
+      enrollmentCodeId: code2!.id,
+      status: "active",
+      provisionFlow: "admin",
+      lastHeartbeatAt: null,
+    });
+
+    const page = await app.request("/admin/reports/stale", {
+      headers: { cookie: sessionCookie },
+    });
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain("Stale machines");
+    expect(html).not.toContain('<img src=x onerror=alert(1)>');
+    expect(
+      html.includes("&lt;img") || html.includes("&#x3C;img"),
+    ).toBe(true);
+  });
+
+  test("machine detail page renders activation timeline", async () => {
+    const { app } = await createTestApp({ pools });
+    const { admin, password } = await seedAdmin();
+
+    const loginPage = await app.request("/admin/login");
+    const loginHtml = await loginPage.text();
+    const csrf = loginHtml.match(/name="csrf" value="([^"]+)"/)?.[1];
+    expect(csrf).toBeTruthy();
+    const cookies1 = parseSetCookies(loginPage);
+
+    const loginPost = await app.request("/admin/login", {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        cookie: `csrf=${encodeURIComponent(csrf!)}`,
+      },
+      body: new URLSearchParams({
+        csrf: csrf!,
+        employee_id: admin.employeeId,
+        password,
+      }).toString(),
+      redirect: "manual",
+    });
+    const cookies2 = parseSetCookies(loginPost);
+    const sessionCookie = `staka_admin=${encodeURIComponent(cookies2.staka_admin)}; csrf=${encodeURIComponent(cookies2.csrf ?? csrf!)}`;
+
+    const [staff] = await pools.owner
+      .insert(users)
+      .values({
+        employeeId: `EMP-TL-${crypto.randomUUID().slice(0, 8)}`,
+        displayName: "Timeline Target",
+        role: "staff",
+        status: "invited",
+      })
+      .returning();
+
+    const plain = generateEnrollmentCode();
+    const [code] = await pools.owner
+      .insert(activationCodes)
+      .values({
+        codeHash: hashEnrollmentCode(plain),
+        codeDisplay: maskEnrollmentCode(plain),
+        userId: staff!.id,
+        createdBy: admin.id,
+        expiresAt: new Date(Date.now() + 86_400_000),
+        maxUses: 1,
+        flow: "admin",
+      })
+      .returning();
+
+    const hw = hwidFixture(crypto.randomUUID());
+    const [machine] = await pools.owner
+      .insert(machines)
+      .values({
+        hardwareId: hw.hardware_id,
+        hwidHash: hw.hwid_hash,
+        hwidDisplay: `${hw.components.product_name}-***-tl`,
+        hwidComponents: hw.components,
+        hostname: "timeline-host",
+        userId: staff!.id,
+        enrollmentCodeId: code!.id,
+        status: "active",
+        provisionFlow: "admin",
+        lastHeartbeatAt: new Date(),
+      })
+      .returning();
+
+    const now = Date.now();
+    await pools.owner.insert(usageLogs).values([
+      { machineId: machine!.id, eventType: "activation_requested", createdAt: new Date(now - 300_000) },
+      { machineId: machine!.id, eventType: "activation_approved", createdAt: new Date(now - 240_000) },
+      { machineId: machine!.id, eventType: "token_issued", createdAt: new Date(now - 180_000) },
+      { machineId: machine!.id, eventType: "heartbeat", createdAt: new Date(now - 120_000) },
+      { machineId: machine!.id, eventType: "heartbeat", createdAt: new Date(now - 60_000) },
+    ]);
+
+    const page = await app.request(`/admin/machines/${machine!.id}`, {
+      headers: { cookie: sessionCookie },
+    });
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain("Activation timeline");
+    expect(html).toContain("Enrollment requested");
+    expect(html).toContain("Approved");
+    expect(html).toContain("Machine token issued");
+    expect(html).toContain("2 heartbeats");
   });
 });
