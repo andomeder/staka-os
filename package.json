@@ -7,6 +7,7 @@
     "typecheck": "bun run --filter '*' typecheck"
   },
   "devDependencies": {
+    "@socketsecurity/bun-security-scanner": "^1.1.2",
     "typescript": "7.0.2"
   }
 }
