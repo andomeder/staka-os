@@ -21,7 +21,8 @@ export DATABASE_URL="postgres://staka@127.0.0.1:$(docker compose port postgres 5
 bun run db:migrate
 bun run db:seed
 bun run dev
-curl -s localhost:8080/v1/health
+# bare bun listens on PORT from .env (default 8080)
+curl -s "http://127.0.0.1:${PORT:-8080}/v1/health"
 ```
 
 Full containerized path (migrate then app):
@@ -78,9 +79,76 @@ Behind Caddy or another reverse proxy, set `TRUST_PROXY=1` so rate limits use
 
 ## Production image
 
+Build from repo root:
+
 ```bash
-# from repo root
 docker build -f packages/org-server/Dockerfile -t staka-org-server .
+```
+
+GHCR image: `ghcr.io/andomeder/staka-org-server` (tags: full git sha, short sha,
+`latest`). Published by `.github/workflows/release-org-server.yml` on tag
+`org-server-v*` or workflow_dispatch. Manual push:
+
+```bash
+SHA=$(git rev-parse HEAD)
+docker build -f packages/org-server/Dockerfile -t "ghcr.io/andomeder/staka-org-server:${SHA}" .
+docker tag "ghcr.io/andomeder/staka-org-server:${SHA}" ghcr.io/andomeder/staka-org-server:latest
+echo "$GHCR_TOKEN" | docker login ghcr.io -u andomeder --password-stdin
+docker push "ghcr.io/andomeder/staka-org-server:${SHA}"
+docker push ghcr.io/andomeder/staka-org-server:latest
+```
+
+On a VPS, pin the compose `image:` lines to the full sha (or digests) so deploys
+do not float on `:latest`. Local compose sets `pull_policy: build` so a clean
+host builds from this tree instead of pulling GHCR first.
+
+### Host layout (`/opt/staka-org-server`)
+
+```
+/opt/staka-org-server/
+  docker-compose.prod.yml
+  Caddyfile                 # reverse proxy on deploy host; optional locally
+  secrets/                  # mode 0700 dir; secret files mode 600; never commit real secrets
+    postgres_user
+    postgres_password
+    database_url            # owner/migrate URL (postgres://staka:...@postgres:5432/staka)
+    database_app_url
+    database_admin_url
+    staka_jwt_keys
+    staka_app_password      # used once by role-passwords init
+    staka_admin_password
+  backups/
+  .env                      # non-secret toggles only (e.g. STAKA_ORG_HOST_PORT=18080)
+```
+
+Shape-only examples live in `secrets/*.example`. Generate real files once:
+
+```bash
+cd packages/org-server
+./scripts/gen-prod-secrets.sh
+# refuses overwrite if secrets already exist (avoids DB lockout).
+# rotate deliberately: FORCE=1 ./scripts/gen-prod-secrets.sh
+# optional: pick a free loopback port if 18080 is taken
+export STAKA_ORG_HOST_PORT=18080
+docker compose -f docker-compose.prod.yml up -d --build
+# host probes (image is distroless; no in-container curl)
+HOST_PORT=${STAKA_ORG_HOST_PORT:-18080}
+curl -fsS "http://127.0.0.1:${HOST_PORT}/v1/health"
+curl -fsS "http://127.0.0.1:${HOST_PORT}/v1/ready"
+# or: docker compose -f docker-compose.prod.yml port org-server 8080
+```
+
+`docker-compose.prod.yml` runs: postgres → migrate (same image, `migrate`) →
+role-passwords (sets scram passwords on `staka_app` / `staka_admin`) →
+`org-server` (`serve`) with `NODE_ENV=production`, `TRUST_PROXY=1`, dual DB
+role secrets, JWT file secret, bind `127.0.0.1:${STAKA_ORG_HOST_PORT:-18080}` →
+container `8080`. Postgres is not published. Dev compose already uses an
+ephemeral host port (`127.0.0.1::8080`). Caddy should reverse_proxy to the
+chosen host port, not a public `8080`.
+
+Single-container equivalent:
+
+```bash
 docker run --rm \
   -e NODE_ENV=production \
   -e TRUST_PROXY=1 \
@@ -93,15 +161,12 @@ docker run --rm \
   -v "$PWD/secrets/database_admin_url:/run/secrets/database_admin_url:ro" \
   -v "$PWD/secrets/staka_jwt_keys:/run/secrets/staka_jwt_keys:ro" \
   staka-org-server migrate
-docker run --rm -p 127.0.0.1:8080:8080 \
+docker run --rm -p "127.0.0.1:${STAKA_ORG_HOST_PORT:-18080}:8080" \
   -e NODE_ENV=production \
   -e TRUST_PROXY=1 \
   # same secret mounts as above
   staka-org-server serve
 ```
-
-`docker-compose.prod.yml` is still a sketch for the packaging track; the binary
-now supports migrate, serve, and `*_FILE` secrets.
 
 ## Endpoints
 
