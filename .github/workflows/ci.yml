@@ -39,6 +39,14 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
+      - name: Socket.dev supply-chain scan
+        run: |
+          if [ -n "${SOCKET_API_KEY:-}" ]; then
+            echo "Socket.dev scanner active (ran during bun install)."
+          else
+            echo "::notice::Socket.dev scan skipped - SOCKET_API_KEY not set. Set the repo secret to enable supply-chain scanning."
+          fi
+
       - name: Configure DATABASE_URL
         run: |
           PORT="${{ job.services.postgres.ports[5432] }}"
