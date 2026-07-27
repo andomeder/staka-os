@@ -2,6 +2,7 @@ import { Hono } from "hono";
 
 export type HealthDeps = {
   checkDb?: () => Promise<boolean>;
+  orgUrl?: string;
 };
 
 export function healthRoutes(deps: HealthDeps = {}) {
@@ -24,6 +25,13 @@ export function healthRoutes(deps: HealthDeps = {}) {
     } catch {
       return c.json({ ok: false, db: "unreachable" }, 503);
     }
+  });
+
+  app.get("/.well-known/staka-org.json", (c) => {
+    if (!deps.orgUrl) {
+      return c.json({ error: "not_configured" }, 404);
+    }
+    return c.json({ org_url: deps.orgUrl });
   });
 
   return app;

@@ -70,6 +70,7 @@ export async function serve(
     sessions,
     flashes,
   };
+  if (env.STAKA_ORG_URL) appDeps.orgUrl = env.STAKA_ORG_URL;
   if (autoApproveActorId) appDeps.autoApproveActorId = autoApproveActorId;
   if (hasDb) {
     appDeps.checkDb = () => checkDb(env.DATABASE_APP_URL || env.DATABASE_URL);

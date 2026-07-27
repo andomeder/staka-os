@@ -26,6 +26,7 @@ const EnvSchema = z
     STAKA_ALLOW_SINGLE_DB_ROLE: boolish.default(false),
     STAKA_MIGRATIONS_DIR: z.string().min(1).optional(),
     TRUST_PROXY: boolish.default(false),
+    STAKA_ORG_URL: z.string().url().optional(),
     LOG_LEVEL: z
       .enum(["fatal", "error", "warn", "info", "debug", "trace"])
       .default("info"),
