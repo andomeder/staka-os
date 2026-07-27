@@ -2,6 +2,9 @@ import { Hono } from "hono";
 import type { Env } from "./env.ts";
 import { bootstrap, startHeartbeat } from "./bootstrap.ts";
 import { pullConfig } from "./config-pull.ts";
+import { chatRoutes } from "./api/routes.ts";
+import { createAgent } from "./agent-factory.ts";
+import type { StreamFn } from "@earendil-works/pi-agent-core";
 
 export type AgentState = {
   status: "starting" | "active" | "degraded" | "suspended";
@@ -12,7 +15,16 @@ export type AgentState = {
   error: string | null;
 };
 
-export function createApp(state: AgentState) {
+export type ChatConfig = {
+  env: Env;
+  orgUrl: string;
+  token: string;
+  orgName?: string | null;
+  streamFn?: StreamFn;
+  fetch?: typeof fetch;
+};
+
+export function createApp(state: AgentState, chat?: ChatConfig) {
   const app = new Hono();
 
   app.get("/health", (c) => {
@@ -27,6 +39,10 @@ export function createApp(state: AgentState) {
     });
   });
 
+  if (chat) {
+    app.route("/", chatRoutes({ makeAgent: () => createAgent(chat) }));
+  }
+
   return app;
 }
 
@@ -40,7 +56,7 @@ export async function serve(env: Env) {
     error: null,
   };
 
-  const app = createApp(state);
+  let chat: ChatConfig | undefined;
 
   try {
     const boot = await bootstrap(env);
@@ -51,6 +67,13 @@ export async function serve(env: Env) {
     state.orgName = config.org_name;
     state.configVersion = config.version;
     state.status = "active";
+
+    chat = {
+      env,
+      orgUrl: boot.orgUrl,
+      token: boot.token,
+      orgName: config.org_name,
+    };
 
     startHeartbeat(
       boot.orgUrl,
@@ -69,6 +92,8 @@ export async function serve(env: Env) {
     state.status = "degraded";
     state.error = err instanceof Error ? err.message : String(err);
   }
+
+  const app = createApp(state, chat);
 
   const server = Bun.serve({
     hostname: env.STAKA_AGENT_HOST,
