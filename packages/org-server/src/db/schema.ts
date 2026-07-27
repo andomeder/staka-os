@@ -39,6 +39,10 @@ export const usageEventTypeEnum = pgEnum("usage_event_type", [
   "admin_read_pii",
   "user_authenticated_self_provision",
   "config_pull",
+  "agent_user_search",
+  "agent_action",
+  "agent_error",
+  "skill_invoked",
 ]);
 
 const ts = (name: string) =>

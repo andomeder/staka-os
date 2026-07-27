@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, asc, eq, ilike, isNull, or } from "drizzle-orm";
 import type { Db } from "../db/client.ts";
 import { users, type NewUser, type User } from "../db/schema.ts";
 import { hashPassword } from "./password.ts";
@@ -152,4 +152,32 @@ export async function setUserPassword(
     .where(and(eq(users.id, id), isNull(users.deletedAt)))
     .returning(publicUserColumns);
   return row ?? null;
+}
+
+/** Escape ILIKE wildcards so %, _, and \ match literally. */
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, "\\$&");
+}
+
+export async function searchUsers(
+  db: Db,
+  query: string,
+  limit = 10,
+): Promise<PublicUser[]> {
+  const prefix = `${escapeLikePattern(query)}%`;
+  return db
+    .select(publicUserColumns)
+    .from(users)
+    .where(
+      and(
+        isNull(users.deletedAt),
+        or(
+          ilike(users.employeeId, prefix),
+          ilike(users.displayName, prefix),
+          ilike(users.email, prefix),
+        ),
+      ),
+    )
+    .orderBy(asc(users.createdAt))
+    .limit(limit);
 }

@@ -77,3 +77,35 @@ export const AgentEvent = z.discriminatedUnion("type", [
 ]);
 
 export type AgentEvent = z.infer<typeof AgentEvent>;
+
+export const UserSearchEntry = z
+  .object({
+    employee_id: z.string(),
+    display_name: z.string(),
+    email: z.string().nullable(),
+    status: z.enum(["invited", "active", "suspended"]),
+  })
+  .strict();
+
+export type UserSearchEntry = z.infer<typeof UserSearchEntry>;
+
+export const UserSearchResponse = z.array(UserSearchEntry);
+
+export type UserSearchResponse = z.infer<typeof UserSearchResponse>;
+
+export const UsageLogRequest = z
+  .object({
+    event_type: z.enum(["agent_action", "agent_error", "skill_invoked"]),
+    detail: z.string().max(2000).optional(),
+  })
+  .strict();
+
+export type UsageLogRequest = z.infer<typeof UsageLogRequest>;
+
+export const UsageLogResponse = z
+  .object({
+    ok: z.literal(true),
+  })
+  .strict();
+
+export type UsageLogResponse = z.infer<typeof UsageLogResponse>;

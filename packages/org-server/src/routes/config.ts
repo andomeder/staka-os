@@ -1,17 +1,26 @@
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
-import type { ConfigResponse, MachineMeResponse } from "@staka/protocol";
+import type {
+  ConfigResponse,
+  MachineMeResponse,
+  UserSearchResponse,
+  UsageLogResponse,
+  } from "@staka/protocol";
+import { UsageLogRequest } from "@staka/protocol";
 import type { Db } from "../db/client.ts";
 import { machines, usageLogs, users } from "../db/schema.ts";
 import type { JwtKeyring } from "../lib/jwt.ts";
 import type { MachineStatusCache } from "../lib/machine-status-cache.ts";
 import { machineBearerAuth } from "../middleware/machine-auth.ts";
+import type { ActivationRateLimiters } from "../lib/rate-limit.ts";
+import { searchUsers } from "../lib/users.ts";
 
 export type ConfigDeps = {
   dbApp: Db;
   keyring: JwtKeyring;
   statusCache?: MachineStatusCache;
   orgName?: string;
+  rateLimiters?: ActivationRateLimiters;
 };
 
 export function buildConfig(orgName?: string): ConfigResponse {
@@ -103,6 +112,76 @@ export function configRoutes(deps: ConfigDeps) {
       },
     };
 
+    return c.json(body);
+  });
+
+  app.get("/v1/users/search", auth, async (c) => {
+    const { machineId } = c.get("machineAuth");
+    const q = c.req.query("q")?.trim() ?? "";
+    if (q.length < 2) {
+      return c.json(
+        { error: "invalid_query", request_id: c.get("requestId") },
+        400,
+      );
+    }
+
+    if (deps.rateLimiters) {
+      const hit = deps.rateLimiters.usersSearch.hit(machineId);
+      if (!hit.ok) {
+        c.header("Retry-After", String(hit.retryAfterSec));
+        return c.json(
+          { error: "rate_limited", request_id: c.get("requestId") },
+          429,
+        );
+      }
+    }
+
+    const rows = await searchUsers(deps.dbApp, q, 10);
+
+    await deps.dbApp.insert(usageLogs).values({
+      machineId,
+      eventType: "agent_user_search",
+      payload: { q },
+    });
+
+    const body: UserSearchResponse = rows.map((row) => ({
+      employee_id: row.employeeId,
+      display_name: row.displayName,
+      email: row.email,
+      status: row.status,
+    }));
+
+    return c.json(body);
+  });
+
+  app.post("/v1/usage-logs", auth, async (c) => {
+    const { machineId } = c.get("machineAuth");
+
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return c.json(
+        { error: "invalid_body", request_id: c.get("requestId") },
+        400,
+      );
+    }
+
+    const parsed = UsageLogRequest.safeParse(raw);
+    if (!parsed.success) {
+      return c.json(
+        { error: "invalid_body", request_id: c.get("requestId") },
+        400,
+      );
+    }
+
+    await deps.dbApp.insert(usageLogs).values({
+      machineId,
+      eventType: parsed.data.event_type,
+      payload: { detail: parsed.data.detail ?? null },
+    });
+
+    const body: UsageLogResponse = { ok: true };
     return c.json(body);
   });
 

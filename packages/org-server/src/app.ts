@@ -125,6 +125,7 @@ export function createApp(deps: AppDeps = {}) {
       keyring: deps.keyring,
     };
     if (deps.statusCache) cfgDeps.statusCache = deps.statusCache;
+    if (deps.rateLimiters) cfgDeps.rateLimiters = deps.rateLimiters;
     app.route("/", configRoutes(cfgDeps));
   }
 
