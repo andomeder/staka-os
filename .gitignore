@@ -38,3 +38,8 @@ packages/org-server/secrets/*
 tmp/
 .cache/
 .graphite_metadata.db
+
+# ISO build artifacts (staged before mkarchiso, not tracked)
+packages/image/configs/airootfs/opt/staka/agent/
+packages/image/configs/airootfs/opt/staka/shell/
+packages/image/configs/airootfs/opt/staka/skills/
