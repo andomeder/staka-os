@@ -116,7 +116,9 @@ QtObject {
 
       if (xhr.readyState === XMLHttpRequest.DONE) {
         flushEvent()
-        if (xhr.status !== 200) {
+        if (xhr.status === 0) {
+          onEvent({ type: "error", message: "Cannot reach the Staka agent at " + root.baseUrl })
+        } else if (xhr.status !== 200) {
           onEvent({ type: "error", message: "agent returned HTTP " + xhr.status })
         }
         onEvent({ type: "done" })
