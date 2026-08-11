@@ -12,6 +12,7 @@ import { adminRoutes } from "./routes/admin.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { dashboardRoutes } from "./routes/dashboard.tsx";
 import { healthRoutes, type HealthDeps } from "./routes/health.ts";
+import { configRoutes } from "./routes/config.ts";
 
 export type AppDeps = HealthDeps & {
   logger?: {
@@ -118,7 +119,14 @@ export function createApp(deps: AppDeps = {}) {
     }
   }
 
-  app.get("/v1/config", (c) => c.json({}));
+  if (deps.dbApp && deps.keyring) {
+    const cfgDeps: Parameters<typeof configRoutes>[0] = {
+      dbApp: deps.dbApp,
+      keyring: deps.keyring,
+    };
+    if (deps.statusCache) cfgDeps.statusCache = deps.statusCache;
+    app.route("/", configRoutes(cfgDeps));
+  }
 
   app.notFound((c) =>
     c.json({ error: "not_found", request_id: c.get("requestId") }, 404),

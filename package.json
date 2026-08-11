@@ -3,7 +3,7 @@
   "private": true,
   "workspaces": ["packages/*"],
   "scripts": {
-    "test": "bun test --cwd packages/protocol && bun test --cwd packages/org-server",
+    "test": "bun test --cwd packages/protocol && bun test --cwd packages/org-server && bun test --cwd packages/agent",
     "typecheck": "bun run --filter '*' typecheck"
   },
   "devDependencies": {
