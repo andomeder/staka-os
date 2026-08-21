@@ -47,6 +47,25 @@ install_omarchy() {
   fi
 }
 
+install_staka_agent() {
+  # Stage ISO agent artifacts onto the target root so the chroot setup
+  # script can install the binary, unit, shell, and skills.
+  if [[ -d /opt/staka ]]; then
+    mkdir -p /mnt/opt/staka
+    cp -r /opt/staka/. /mnt/opt/staka/
+  fi
+
+  if [[ ! -f /root/staka-agent-setup.sh ]]; then
+    echo "staka-agent-setup.sh missing; skipping agent install" >&2
+    return 0
+  fi
+  cp /root/staka-agent-setup.sh /mnt/root/staka-agent-setup.sh
+  chmod +x /mnt/root/staka-agent-setup.sh
+
+  chroot_bash /root/staka-agent-setup.sh
+  rm -f /mnt/root/staka-agent-setup.sh
+}
+
 # Set Tokyo Night color scheme for the terminal
 set_tokyo_night_colors() {
   if [[ $(tty) == "/dev/tty"* ]]; then
@@ -300,4 +319,5 @@ if [[ $(tty) == "/dev/tty1" ]]; then
   run_configurator
   install_arch
   install_omarchy
+  install_staka_agent
 fi

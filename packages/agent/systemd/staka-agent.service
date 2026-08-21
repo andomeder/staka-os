@@ -1,0 +1,14 @@
+[Unit]
+Description=Staka Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/staka-agent serve
+Restart=on-failure
+RestartSec=5
+Environment=STAKA_STATE_DIR=%h/.local/share/staka/agent
+
+[Install]
+WantedBy=default.target
