@@ -5,7 +5,10 @@ import type { Env } from "./env.ts";
 import { createOrgTools } from "./tools/org.ts";
 import { createSkillsTools } from "./tools/skills.ts";
 import { createSkillManageTool } from "./tools/skill-manage.ts";
-import type { SourcedSkill } from "./skills/loader.ts";
+import { createMemoryTool } from "./tools/memory.ts";
+import { createSessionSearchTool } from "./tools/session-search.ts";
+import { buildMemoryPromptBlock } from "./memory/personal.ts";
+import { buildSkillsIndex, type SourcedSkill } from "./skills/loader.ts";
 
 export type CreateAgentDeps = {
   env: Env;
@@ -33,15 +36,17 @@ function buildSystemPrompt(orgName?: string | null, skills?: SourcedSkill[]): st
     "Prefer org_whoami for identity questions and org_users_search to find colleagues.",
     "Use org_log_event to record notable agent actions.",
   ];
+
+  const memoryBlock = buildMemoryPromptBlock();
+  if (memoryBlock) {
+    parts.push("", memoryBlock);
+  }
+
   if (skills && skills.length > 0) {
-    const index = skills
-      .filter((s) => !s.skill.disableModelInvocation)
-      .map((s) => {
-        const tag = s.source === "user" ? " [self]" : "";
-        return `- ${s.skill.name}: ${s.skill.description}${tag}`;
-      })
-      .join("\n");
-    parts.push("", "<available_skills>", index, "", "To use a skill, call skill_view(name) to load its full instructions.", "</available_skills>");
+		const index = buildSkillsIndex(skills);
+		if (index) {
+			parts.push("", index);
+		}
   }
   return parts.join("\n");
 }
@@ -59,7 +64,9 @@ export function createAgent(deps: CreateAgentDeps): Agent {
     sessionId: deps.sessionId ?? crypto.randomUUID(),
     createsThisSession,
   });
-  const tools = [...orgTools, ...skillsTools, skillManageTool];
+  const memoryTool = createMemoryTool();
+  const sessionSearchTool = createSessionSearchTool();
+  const tools = [...orgTools, ...skillsTools, skillManageTool, memoryTool, sessionSearchTool];
   return new Agent({
     initialState: {
       systemPrompt: buildSystemPrompt(deps.orgName, skills),
