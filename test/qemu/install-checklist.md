@@ -104,6 +104,21 @@ export STAKA_HWID_CPU_ID='QEMU Virtual CPU'
   --token-out /tmp/machine.token
 ```
 
+## 7. Agent and shell (installed system)
+
+After first boot of the installed system, log in to the desktop.
+
+- [ ] `systemctl --user status staka-agent` shows active (running)
+- [ ] `curl -s http://127.0.0.1:7920/health` returns JSON with `machine_id` and `org_name`
+- [ ] `ls ~/.agents/skills/staka/` shows org skill pack symlink
+- [ ] Super+A opens the AI panel
+- [ ] Type "who am I" in the panel; agent responds with employee identity
+- [ ] Close and reopen the panel; previous session is visible
+
+If the agent binary was not staged in the ISO (`/opt/staka/agent/staka-agent`
+missing), these checks are skipped and the gap is noted in the record.
+
+
 ## Record
 
 | Field | Value |
@@ -114,8 +129,10 @@ export STAKA_HWID_CPU_ID='QEMU Virtual CPU'
 | Enroll HTTP | |
 | Token on target | yes/no |
 | Heartbeat / dashboard | |
+| Agent service | active/skipped |
+| Panel (Super+A) | yes/no/skipped |
 | Notes | |
 
 ## Pass bar
 
-Pass when: rebuilt ISO boots, Flow A enroll reaches the org server, and `/etc/staka/machine.token` lands on the installed root (or a documented fallback with an explicit gap). Full install plus heartbeat preferred.
+Pass when: rebuilt ISO boots, Flow A enroll reaches the org server, and `/etc/staka/machine.token` lands on the installed root (or a documented fallback with an explicit gap). Full install plus heartbeat preferred. Agent section passes when the service is active and the panel opens, or the gap is documented.
