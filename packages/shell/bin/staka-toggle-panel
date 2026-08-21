@@ -1,0 +1,12 @@
+#!/bin/bash
+
+# staka:summary=Toggle the Staka AI assistant panel
+#
+# Bound to Super+A. Resolves the shell root from STAKA_SHELL_PATH, falling
+# back to this script's grandparent directory (the package root that contains
+# shell/ and bin/). Best-effort: a missing or stopped shell is a no-op.
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+export STAKA_SHELL_PATH=${STAKA_SHELL_PATH:-$(dirname -- "$script_dir")}
+
+exec "$script_dir/staka-shell" -q shell toggle staka.ai-panel

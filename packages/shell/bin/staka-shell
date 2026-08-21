@@ -1,0 +1,71 @@
+#!/bin/bash
+
+# staka:summary=Send an IPC call to the running Staka shell
+# staka:args=[-q] <target> <method> [args...]
+# staka:examples=staka-shell shell ping | staka-shell shell toggle staka.ai-panel
+
+QUIET=0
+if [[ ${1:-} == "-q" ]]; then
+  QUIET=1
+  shift
+fi
+
+fail() {
+  (( QUIET )) && exit 0
+  echo "$1" >&2
+  exit 1
+}
+
+if (( $# == 0 )) || [[ $1 == "-h" || $1 == "--help" ]]; then
+  cat <<USAGE
+Usage: staka-shell [-q] <target> <method> [args...]
+
+Forwards an IPC call to the running Staka shell. The shell is expected
+to already be running; this command does not start it.
+
+The shell root is resolved from STAKA_SHELL_PATH (the directory that
+contains shell/shell.qml).
+
+Options:
+  -q  Quiet best-effort mode. Suppress output and return success even when
+      the shell, target, method, or arguments are unavailable.
+
+Examples:
+  staka-shell shell ping
+  staka-shell shell listPlugins
+  staka-shell shell toggle staka.ai-panel
+USAGE
+  exit 0
+fi
+
+(( $# >= 2 )) || fail "Usage: staka-shell <target> <method> [args...]"
+[[ -n ${STAKA_SHELL_PATH:-} ]] || fail "STAKA_SHELL_PATH is not set"
+[[ -f $STAKA_SHELL_PATH/shell/shell.qml ]] || fail "staka-shell config not found: $STAKA_SHELL_PATH/shell/shell.qml"
+
+if [[ $1 == "shell" && ( $2 == "summon" || $2 == "toggle" ) ]] && (( $# == 3 )); then
+  set -- "$1" "$2" "$3" "{}"
+fi
+
+# The -- keeps function names that shadow qs subcommands (e.g. show) as
+# positionals. qs reports connection failures with a nonzero exit, but IPC-level
+# failures (unknown target/function, bad arguments) go to stdout with exit 0.
+ipc_timeout=${STAKA_SHELL_IPC_TIMEOUT:-2s}
+output=$(timeout --kill-after=1s "$ipc_timeout" qs -p "$STAKA_SHELL_PATH/shell" ipc call -- "$@" 2>/dev/null)
+ipc_status=$?
+
+if (( ipc_status == 124 || ipc_status == 137 )); then
+  fail "staka-shell is not responding"
+elif (( ipc_status != 0 )); then
+  fail "staka-shell is not running"
+fi
+
+case $output in
+  "Target not found." | "Function not found." | "Too few arguments provided"* | "Too many arguments provided"*)
+    fail "$output"
+    ;;
+esac
+
+if (( ! QUIET )) && [[ -n $output ]]; then
+  echo "$output"
+fi
+exit 0
