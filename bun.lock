@@ -18,6 +18,7 @@
         "@staka/protocol": "workspace:*",
         "hono": "4.12.27",
         "jose": "6.2.3",
+        "typebox": "1.1.38",
         "zod": "4.4.3",
       },
       "devDependencies": {
