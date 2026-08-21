@@ -5,6 +5,9 @@ import { pullConfig } from "./config-pull.ts";
 import { chatRoutes } from "./api/routes.ts";
 import { createAgent } from "./agent-factory.ts";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
+import { loadSkills, type SourcedSkill } from "./skills/loader.ts";
+import { ensureOrgSkillSymlink } from "./skills/symlink.ts";
+import { shouldRunCurator, runCurator } from "./skills/curator.ts";
 
 export type AgentState = {
   status: "starting" | "active" | "degraded" | "suspended";
@@ -22,9 +25,10 @@ export type ChatConfig = {
   orgName?: string | null;
   streamFn?: StreamFn;
   fetch?: typeof fetch;
+  skills?: SourcedSkill[];
 };
 
-export function createApp(state: AgentState, chat?: ChatConfig) {
+export function createApp(state: AgentState, chat?: ChatConfig, skills?: SourcedSkill[]) {
   const app = new Hono();
 
   app.get("/health", (c) => {
@@ -33,14 +37,14 @@ export function createApp(state: AgentState, chat?: ChatConfig) {
       machine_id: state.machineId,
       org_name: state.orgName,
       model: null,
-      skills_count: 0,
+      skills_count: skills?.length ?? 0,
       memory_entries: 0,
       error: state.error,
     });
   });
 
   if (chat) {
-    app.route("/", chatRoutes({ makeAgent: () => createAgent(chat) }));
+    app.route("/", chatRoutes({ makeAgent: () => createAgent({ ...chat, skills }) }));
   }
 
   return app;
@@ -57,6 +61,7 @@ export async function serve(env: Env) {
   };
 
   let chat: ChatConfig | undefined;
+  let skills: SourcedSkill[] = [];
 
   try {
     const boot = await bootstrap(env);
@@ -67,6 +72,20 @@ export async function serve(env: Env) {
     state.orgName = config.org_name;
     state.configVersion = config.version;
     state.status = "active";
+
+    ensureOrgSkillSymlink();
+    const loaded = await loadSkills();
+    skills = loaded.skills;
+    if (loaded.diagnostics.length > 0) {
+      console.warn("skills diagnostics:", loaded.diagnostics);
+    }
+
+    if (shouldRunCurator()) {
+      const result = runCurator();
+      if (result.archived.length > 0) {
+        console.log("curator archived:", result.archived);
+      }
+    }
 
     chat = {
       env,
@@ -93,7 +112,7 @@ export async function serve(env: Env) {
     state.error = err instanceof Error ? err.message : String(err);
   }
 
-  const app = createApp(state, chat);
+  const app = createApp(state, chat, skills);
 
   const server = Bun.serve({
     hostname: env.STAKA_AGENT_HOST,
@@ -101,5 +120,5 @@ export async function serve(env: Env) {
     fetch: app.fetch,
   });
 
-  console.log(`staka-agent listening on ${server.hostname}:${server.port} (status: ${state.status})`);
+  console.log(`staka-agent listening on ${server.hostname}:${server.port} (status: ${state.status}, skills: ${skills.length})`);
 }
