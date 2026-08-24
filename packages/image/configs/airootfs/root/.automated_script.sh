@@ -40,11 +40,6 @@ install_omarchy() {
   chroot_bash -lc "source /home/$OMARCHY_USER/.local/share/omarchy/install.sh"
 
   configure_login_for_unencrypted_install
-
-  # Reboot if requested by installer
-  if [[ -f /mnt/var/tmp/omarchy-install-completed ]]; then
-    reboot
-  fi
 }
 
 install_staka_agent() {
@@ -320,4 +315,10 @@ if [[ $(tty) == "/dev/tty1" ]]; then
   install_arch
   install_omarchy
   install_staka_agent
+
+  # Reboot if requested by installer (after agent install so the
+  # agent setup is never skipped by an early reboot)
+  if [[ -f /mnt/var/tmp/omarchy-install-completed ]]; then
+    reboot
+  fi
 fi
