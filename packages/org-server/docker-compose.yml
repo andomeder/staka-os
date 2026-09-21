@@ -36,6 +36,24 @@ services:
         condition: service_healthy
     restart: "no"
 
+  supermemory:
+    # Knowledge base retrieval engine (supermemory lite, MIT). Private:
+    # only org-server talks to it, never agents and never the public internet.
+    image: debian:bookworm-slim
+    command:
+      [
+        "/bin/sh",
+        "-ec",
+        "VERSION=0.0.8; BIN=/data/bin/supermemory-server; mkdir -p /data/bin; if [ ! -x \"$$BIN\" ]; then apt-get update -qq; apt-get install -y -qq --no-install-recommends curl ca-certificates; curl -fsSL \"https://github.com/supermemoryai/supermemory/releases/download/server-v$$VERSION/supermemory-server-linux-x64\" -o \"$$BIN.download\"; curl -fsSL \"https://github.com/supermemoryai/supermemory/releases/download/server-v$$VERSION/supermemory-server-linux-x64.sha256\" -o \"$$BIN.download.sha256\"; cd /data/bin; sha256sum -c supermemory-server-linux-x64.sha256; chmod +x supermemory-server.download; mv supermemory-server.download supermemory-server; fi; exec \"$$BIN\"",
+      ]
+    environment:
+      SUPERMEMORY_DATA_DIR: /data
+      # Keep ingest memory bounded next to org-server + postgres on small hosts.
+      SUPERMEMORY_EMBEDDING_RAM_LIMIT: 512mb
+    volumes:
+      - supermemory_data:/data
+    restart: unless-stopped
+
   org-server:
     build:
       context: ../..
@@ -50,6 +68,7 @@ services:
       DATABASE_URL: postgres://staka@postgres:5432/staka
       DATABASE_APP_URL: postgres://staka_app@postgres:5432/staka
       DATABASE_ADMIN_URL: postgres://staka_admin@postgres:5432/staka
+      STAKA_KB_ENGINE_URL: http://supermemory:6767
     depends_on:
       postgres:
         condition: service_healthy
@@ -58,3 +77,4 @@ services:
 
 volumes:
   staka_pg_data:
+  supermemory_data:

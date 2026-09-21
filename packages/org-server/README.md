@@ -180,11 +180,56 @@ docker run --rm -p "127.0.0.1:${STAKA_ORG_HOST_PORT:-18080}:8080" \
 | POST | `/v1/auth/logout` | invalidate session |
 | * | `/v1/admin/*` | admin API (Bearer admin JWT) |
 | * | `/admin/*` | server-rendered dashboard |
+| POST | `/v1/kb/search` | agent KB search (machine JWT) |
+| POST | `/v1/kb/skills` | agent org-skill search (machine JWT) |
+| POST | `/v1/kb/who-knows` | evidence-backed colleague resolution (machine JWT) |
+| GET | `/v1/kb/documents/:id` | full document text (machine JWT) |
+| GET/POST | `/v1/admin/skill-packs` | list / upload org skill packs (admin JWT) |
+| GET | `/v1/skill-packs/pull` | machine pulls current pack tarball (machine JWT) |
 
 ```bash
 # create an enrollment code (plaintext printed once)
 bun run code:create -- --employee-id EMP-0001 --flow admin
 ```
+
+## Knowledge base engine
+
+Org documents, directory profiles, and skill packs are indexed into a
+retrieval engine (`supermemory lite`, MIT) deployed as a private second
+container alongside `org-server`. Agents never reach the engine: every
+query goes through `/v1/kb/*` with a machine JWT, and the server resolves
+the org space (one `containerTag` per org) server-side. Documents flagged
+sensitive are excluded from agent retrieval and stay admin-preview only.
+
+Engine environment variables (org-server side):
+
+- `STAKA_KB_ENGINE_URL` - engine base URL (compose: `http://supermemory:6767`).
+  Without it the KB routes answer `503 kb_unavailable` and everything else works.
+- `STAKA_KB_ENGINE_KEY` (or `*_FILE`) - engine API key.
+- `STAKA_KB_SPACE` - optional space override; default derives `org_default`.
+
+First boot of the engine generates its API key and stores it in
+`/data/api-key` inside the `supermemory_data` volume. Copy it into the
+`staka_kb_engine_key` secret and restart `org-server`:
+
+```bash
+docker compose -f docker-compose.prod.yml exec supermemory cat /data/api-key \
+  > secrets/staka_kb_engine_key   # mode 600, never commit
+docker compose -f docker-compose.prod.yml up -d org-server
+```
+
+Ops notes:
+
+- The engine embeds a local embedding model (768d, no API key). An optional
+  LLM key (e.g. `GEMINI_API_KEY`) enables memory extraction during ingest;
+  document search works without one.
+- The self-hosted binary is licensed up to 10,000 documents per store.
+- `SUPERMEMORY_EMBEDDING_RAM_LIMIT` bounds ingest memory; it ships as
+  `512mb` in compose. Measure RSS on the target host before raising it.
+- The engine data directory holds the encrypted store and the API key;
+  include the `supermemory_data` volume in backup coverage alongside
+  Postgres dumps (skill pack bytes live in Postgres, so pack pull/verify
+  is covered by the standard DB backup).
 
 ## Security notes
 

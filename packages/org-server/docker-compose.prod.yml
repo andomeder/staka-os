@@ -86,6 +86,30 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
+  # Knowledge base retrieval engine. Private service: no published port, only
+  # reachable from org-server over the compose network. The engine auto-generates
+  # an API key on first boot; copy it to secrets/staka_kb_engine_key so org-server
+  # can authenticate (see kb-deploy notes in the deployment doc).
+  supermemory:
+    image: debian:bookworm-slim
+    command:
+      [
+        "/bin/sh",
+        "-ec",
+        "VERSION=0.0.8; BIN=/data/bin/supermemory-server; mkdir -p /data/bin; if [ ! -x \"$$BIN\" ]; then apt-get update -qq; apt-get install -y -qq --no-install-recommends curl ca-certificates; curl -fsSL \"https://github.com/supermemoryai/supermemory/releases/download/server-v$$VERSION/supermemory-server-linux-x64\" -o \"$$BIN.download\"; curl -fsSL \"https://github.com/supermemoryai/supermemory/releases/download/server-v$$VERSION/supermemory-server-linux-x64.sha256\" -o \"$$BIN.download.sha256\"; cd /data/bin; sha256sum -c supermemory-server-linux-x64.sha256; chmod +x supermemory-server.download; mv supermemory-server.download supermemory-server; fi; exec \"$$BIN\"",
+      ]
+    environment:
+      SUPERMEMORY_DATA_DIR: /data
+      # Leave RAM headroom for org-server + postgres on the 4 GB host; measure
+      # before raising.
+      SUPERMEMORY_EMBEDDING_RAM_LIMIT: 512mb
+      # Optional: inject an LLM key (e.g. GEMINI_API_KEY) for memory extraction
+      # during ingest. Embeddings + document search run locally without one.
+    volumes:
+      - supermemory_data:/data
+    security_opt: ["no-new-privileges:true"]
+    restart: unless-stopped
+
   org-server:
     image: ghcr.io/andomeder/staka-org-server:latest
     build:
@@ -105,11 +129,14 @@ services:
       DATABASE_APP_URL_FILE: /run/secrets/database_app_url
       DATABASE_ADMIN_URL_FILE: /run/secrets/database_admin_url
       STAKA_JWT_KEYS_FILE: /run/secrets/staka_jwt_keys
+      STAKA_KB_ENGINE_URL: http://supermemory:6767
+      STAKA_KB_ENGINE_KEY_FILE: /run/secrets/staka_kb_engine_key
     secrets:
       - database_url
       - database_app_url
       - database_admin_url
       - staka_jwt_keys
+      - staka_kb_engine_key
     depends_on:
       postgres:
         condition: service_healthy
@@ -128,6 +155,7 @@ services:
 
 volumes:
   staka_pg_data:
+  supermemory_data:
 
 secrets:
   postgres_user:
@@ -142,6 +170,8 @@ secrets:
     file: ./secrets/database_admin_url
   staka_jwt_keys:
     file: ./secrets/staka_jwt_keys
+  staka_kb_engine_key:
+    file: ./secrets/staka_kb_engine_key
   staka_app_password:
     file: ./secrets/staka_app_password
   staka_admin_password:
