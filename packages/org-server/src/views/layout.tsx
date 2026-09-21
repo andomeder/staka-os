@@ -130,6 +130,7 @@ export function Layout(props: {
                 <a href="/admin">Machines</a>
                 <a href="/admin/users">Users</a>
                 <a href="/admin/codes">Codes</a>
+                <a href="/admin/kb">Knowledge base</a>
                 <a href="/admin/reports/stale">Reports</a>
                 <span class="muted">{props.employeeId}</span>
                 <form class="inline" method="post" action="/admin/logout">

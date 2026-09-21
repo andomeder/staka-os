@@ -28,6 +28,19 @@ import {
   clientIp,
   type ActivationRateLimiters,
 } from "../lib/rate-limit.ts";
+import type { KbConfig } from "../lib/kb.ts";
+import {
+  corpusStats,
+  deleteDocument,
+  detectUpload,
+  ingestDocument,
+  KbIngestError,
+  KB_MAX_UPLOAD_BYTES,
+  listDocuments,
+  syncDirectoryProfiles,
+  syncUserProfile,
+  titleFromFilename,
+} from "../lib/kb-ingest.ts";
 import { listMachines, listStaleMachines } from "../lib/reports.ts";
 import {
   createUser,
@@ -42,6 +55,7 @@ import {
 } from "../middleware/admin-auth.ts";
 import {
   CodesPage,
+  KbPage,
   LoginPage,
   MachineDetailPage,
   MachinesPage,
@@ -61,6 +75,7 @@ export type DashboardDeps = AdminAuthDeps & {
   rateLimiters: ActivationRateLimiters;
   trustProxy?: boolean;
   secureCookies?: boolean;
+  kb?: KbConfig;
 };
 
 function userLabel(employeeId: string, displayName: string): string {
@@ -486,6 +501,21 @@ export function dashboardRoutes(deps: DashboardDeps) {
         },
       });
       deps.flashes.set(auth.jti, { message: "created" });
+      const kb = kbIngestDeps();
+      if (kb) {
+        // Keep the KB directory profile in step with the new user. The
+        // user exists either way; a KB hiccup must not fail the create.
+        try {
+          await syncUserProfile(kb, {
+            employeeId: user.employeeId,
+            displayName: user.displayName,
+            role: user.role,
+            email: user.email ?? null,
+          });
+        } catch {
+          // non-fatal: the next directory sync repairs the profile
+        }
+      }
       return c.redirect("/admin/users");
     } catch {
       deps.flashes.set(auth.jti, { message: "conflict" });
@@ -640,6 +670,163 @@ export function dashboardRoutes(deps: DashboardDeps) {
         })}
       />,
     );
+  });
+
+  function kbIngestDeps() {
+    if (!deps.kb) return undefined;
+    return {
+      db: deps.dbAdmin,
+      client: deps.kb.client,
+      space: deps.kb.space,
+      orgId: deps.kb.space.slice("org_".length),
+    };
+  }
+
+  authed.get("/kb", async (c) => {
+    const auth = c.get("adminAuth");
+    const csrf = mintCsrf(c);
+    const flash =
+      deps.flashes.take(auth.jti)?.message ??
+      sanitizeFlash(c.req.query("flash"));
+    const kb = kbIngestDeps();
+    const rows = kb ? await listDocuments(kb) : [];
+    const stats = kb
+      ? await corpusStats(kb)
+      : { documents: 0, sensitive: 0, totalBytes: 0, bySource: {} };
+    return c.html(
+      <KbPage
+        employeeId={auth.employeeId}
+        csrf={csrf}
+        {...(flash ? { flash } : {})}
+        stats={stats}
+        documents={rows.map((d) => ({
+          customId: d.customId,
+          title: d.title,
+          source: d.source,
+          docType: d.docType,
+          sensitive: d.sensitive,
+          sizeBytes: d.sizeBytes,
+          createdAt: d.createdAt.toISOString().slice(0, 10),
+        }))}
+      />,
+    );
+  });
+
+  authed.post("/kb/documents", async (c) => {
+    const auth = c.get("adminAuth");
+    const kb = kbIngestDeps();
+    if (!kb) {
+      deps.flashes.set(auth.jti, { message: "kb_disabled" });
+      return c.redirect("/admin/kb");
+    }
+
+    const cookieToken = getCookie(c, CSRF_COOKIE);
+    const form = await c.req.parseBody();
+    const submitted =
+      typeof form.csrf === "string" ? form.csrf : c.req.header("x-csrf-token");
+    if (!deps.csrf.verifyPair(cookieToken, submitted)) {
+      deps.flashes.set(auth.jti, { message: "csrf" });
+      return c.redirect("/admin/kb");
+    }
+
+    const file = form.file;
+    const title =
+      typeof form.title === "string" && form.title.trim().length > 0
+        ? form.title.trim()
+        : undefined;
+    const sensitive = form.sensitive === "1";
+
+    try {
+      if (!(file instanceof File) || file.size === 0) {
+        throw new KbIngestError(400, "no_file");
+      }
+      if (file.size > KB_MAX_UPLOAD_BYTES) {
+        throw new KbIngestError(413, "too_large");
+      }
+      const detected = detectUpload(file.name);
+      await ingestDocument(kb, {
+        title: title ?? titleFromFilename(file.name),
+        filename: file.name,
+        bytes: new Uint8Array(await file.arrayBuffer()),
+        mime: detected.mime,
+        source: "upload",
+        docType: detected.docType,
+        sensitive,
+        uploadedBy: auth.userId,
+      });
+      await appendAudit(deps.dbAdmin, {
+        actorUserId: auth.userId,
+        action: "kb.document.upload",
+        targetType: "kb_document",
+        targetId: auth.userId,
+        payload: { filename: file.name, sensitive },
+      });
+      deps.flashes.set(auth.jti, { message: "kb_uploaded" });
+    } catch (err) {
+      if (err instanceof KbIngestError) {
+        deps.flashes.set(auth.jti, { message: `kb_${err.status}` });
+      } else {
+        deps.flashes.set(auth.jti, { message: "kb_error" });
+      }
+    }
+    return c.redirect("/admin/kb");
+  });
+
+  authed.post("/kb/documents/:customId/delete", async (c) => {
+    const auth = c.get("adminAuth");
+    const kb = kbIngestDeps();
+    if (!kb) {
+      deps.flashes.set(auth.jti, { message: "kb_disabled" });
+      return c.redirect("/admin/kb");
+    }
+    const checked = await requireCsrf(c);
+    if (!checked.ok) {
+      deps.flashes.set(auth.jti, { message: "csrf" });
+      return c.redirect("/admin/kb");
+    }
+    const customId = c.req.param("customId");
+    const removed = await deleteDocument(kb, customId);
+    if (removed) {
+      await appendAudit(deps.dbAdmin, {
+        actorUserId: auth.userId,
+        action: "kb.document.delete",
+        targetType: "kb_document",
+        targetId: auth.userId,
+        payload: { custom_id: customId },
+      });
+      deps.flashes.set(auth.jti, { message: "kb_deleted" });
+    } else {
+      deps.flashes.set(auth.jti, { message: "kb_missing" });
+    }
+    return c.redirect("/admin/kb");
+  });
+
+  authed.post("/kb/profiles/sync", async (c) => {
+    const auth = c.get("adminAuth");
+    const kb = kbIngestDeps();
+    if (!kb) {
+      deps.flashes.set(auth.jti, { message: "kb_disabled" });
+      return c.redirect("/admin/kb");
+    }
+    const checked = await requireCsrf(c);
+    if (!checked.ok) {
+      deps.flashes.set(auth.jti, { message: "csrf" });
+      return c.redirect("/admin/kb");
+    }
+    try {
+      const count = await syncDirectoryProfiles(kb);
+      await appendAudit(deps.dbAdmin, {
+        actorUserId: auth.userId,
+        action: "kb.profiles.sync",
+        targetType: "kb_document",
+        targetId: auth.userId,
+        payload: { profiles: count },
+      });
+      deps.flashes.set(auth.jti, { message: "kb_profiles_synced" });
+    } catch {
+      deps.flashes.set(auth.jti, { message: "kb_unavailable" });
+    }
+    return c.redirect("/admin/kb");
   });
 
   app.route("/admin", authed);
