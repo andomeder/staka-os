@@ -42,6 +42,7 @@ shell/
       power/
     services/
       battery/
+      guide/
       idle/
       media/
     osd/

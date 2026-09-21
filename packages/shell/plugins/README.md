@@ -33,6 +33,7 @@ User-installed plugins live alongside these conceptually but on disk under
 | Battery       | `staka.battery`         | `service`               | `services/battery/Service.qml`        |
 | Idle          | `staka.idle`            | `service`               | `services/idle/Service.qml`           |
 | Lock screen   | `staka.lock`            | `service`               | `lock/Service.qml`                    |
+| Guide overlay | `staka.guide`           | `service`               | `services/guide/Service.qml`          |
 | OSD           | `staka.osd`             | `panel`                 | `osd/Osd.qml`                         |
 | Polkit agent  | `staka.polkit`          | `service`               | `polkit/PolkitAgent.qml`              |
 
@@ -90,6 +91,29 @@ separate PAM services: `staka-lock-password` for password auth and,
 only when fingerprints are enrolled, `staka-lock-fingerprint` for
 fingerprint auth. It mirrors the previous lock screen field dimensions,
 colors, blurred wallpaper, placeholder, and Hyprland-driven corners.
+
+## Guide overlay
+
+The agent pointing at things on the user's own display: a transparent,
+full-screen layer-shell surface per output at the overlay layer rendering a
+highlight box, a fake accent-colored agent cursor, and an optional label at
+compositor-native global coordinates. The surface carries an empty input
+region so the compositor routes every pointer event to the windows beneath -
+the user's real input is never intercepted. That property is proven on a
+live session by
+[`tests/guide-overlay-clickthrough/`](../tests/guide-overlay-clickthrough/).
+
+Driven over shell IPC, target `guide` (see `bin/staka-shell`):
+
+```bash
+staka-shell guide highlight '{"x": 900, "y": 540, "w": 240, "h": 48, "label": "File > Export"}'
+staka-shell guide sequence '{"steps": [{"x": 100, "y": 200, "label": "View", "durationMs": 3000}, {"x": 300, "y": 400, "label": "Sidebar"}]}'
+staka-shell guide clear
+```
+
+Single highlights auto-dismiss after 10 seconds; sequence steps after 4
+seconds each (per-step `durationMs` overrides). The agent's
+`guide_highlight` / `guide_sequence` tools call this IPC target directly.
 
 ## Polkit agent
 

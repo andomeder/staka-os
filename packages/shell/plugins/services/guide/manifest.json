@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "staka.guide",
+  "name": "Guide overlay",
+  "version": "1.0.0",
+  "author": "Staka",
+  "description": "Click-through agent guidance overlay: fake cursor and highlights on the user's output",
+  "kinds": [
+    "service"
+  ],
+  "entryPoints": {
+    "service": "Service.qml"
+  }
+}
