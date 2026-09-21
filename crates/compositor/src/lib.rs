@@ -1,5 +1,6 @@
 pub mod cage;
 pub mod hyprctl;
+pub mod input;
 pub mod ipc;
 pub mod screencopy;
 pub mod server;
