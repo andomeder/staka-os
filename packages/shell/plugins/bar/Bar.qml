@@ -290,7 +290,8 @@ Item {
   }
 
   readonly property bool vertical: position === "left" || position === "right"
-  readonly property int barSize: vertical ? Style.bar.sizeVertical : Style.bar.sizeHorizontal
+  readonly property int configuredThickness: barConfig && Number(barConfig.thickness) > 0 ? Number(barConfig.thickness) : 0
+  readonly property int barSize: configuredThickness > 0 ? configuredThickness : (vertical ? Style.bar.sizeVertical : Style.bar.sizeHorizontal)
 
   function normalizePosition(value) {
     return BarModel.normalizePosition(value)
@@ -318,7 +319,7 @@ Item {
   function applyBarConfig() {
     var config = Util.isPlainObject(barConfig) ? barConfig : fallbackBarConfig
 
-    position = normalizePosition(config.position)
+    position = normalizePosition(config.position || root.position)
     setRequestedTransparency(config.transparent === true)
     centerAnchor = Util.canonicalWidgetId(config.centerAnchor || "")
     layoutConfig = normalizeLayout(config.layout)

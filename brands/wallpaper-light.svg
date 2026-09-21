@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2560 1440" width="2560" height="1440" fill="none">
+  <defs>
+    <linearGradient id="light-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="50%" stop-color="#F5F8FF"/>
+      <stop offset="100%" stop-color="#EBF1FD"/>
+    </linearGradient>
+    <radialGradient id="light-glow" cx="80%" cy="20%" r="65%">
+      <stop offset="0%" stop-color="#3B7BFF" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="#FFFFFF" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="light-stroke" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E5EFF" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#3B7BFF" stop-opacity="0.08"/>
+    </linearGradient>
+  </defs>
+  <rect width="2560" height="1440" fill="url(#light-bg)"/>
+  <rect width="2560" height="1440" fill="url(#light-glow)"/>
+
+  <g transform="translate(1000, 520) scale(1)">
+    <rect x="0" y="0" width="460" height="110" rx="32" fill="#1E5EFF" fill-opacity="0.06" stroke="url(#light-stroke)" stroke-width="1.5"/>
+    <rect x="100" y="145" width="460" height="110" rx="32" fill="#3B7BFF" fill-opacity="0.08" stroke="url(#light-stroke)" stroke-width="1.5"/>
+    <rect x="0" y="290" width="460" height="110" rx="32" fill="#0B2F8A" fill-opacity="0.05" stroke="url(#light-stroke)" stroke-width="1.5"/>
+  </g>
+</svg>

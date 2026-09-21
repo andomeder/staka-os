@@ -11,3 +11,6 @@ hyprland.bind("SUPER", "A", "exec", "staka-toggle-panel")
 
 # Absolute-path variant (no PATH requirement):
 # hyprland.bind("SUPER", "A", "exec", "/path/to/staka-os/packages/shell/bin/staka-toggle-panel")
+
+-- Staka perimeter band auto-coupler (optional standalone command):
+-- exec_once("staka-band apply")

@@ -64,7 +64,7 @@ PopupWindow {
 
   default property alias contentItem: contentHolder.children
 
-  visible: open || card.opacity > 0
+  visible: open || card.opacity > 0.01
   color: "transparent"
   implicitWidth: contentWidth
   implicitHeight: contentHeight
@@ -154,10 +154,13 @@ PopupWindow {
     borderSpec: root.borderSpec
     padding: root.padding
     radius: Style.cornerRadius
-    opacity: root.open ? 1.0 : 0
 
-    Behavior on opacity {
-      NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+    // Liquid-drop spring behavior connected to perimeter band
+    BandDrop {
+      id: dropAnim
+      target: card
+      active: root.open
+      edge: root.bar ? root.bar.position : "top"
     }
 
     Item {

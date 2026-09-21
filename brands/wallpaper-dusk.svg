@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2560 1440" width="2560" height="1440" fill="none">
+  <defs>
+    <linearGradient id="dusk-bg" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#081026"/>
+      <stop offset="50%" stop-color="#0B1B3D"/>
+      <stop offset="100%" stop-color="#050A17"/>
+    </linearGradient>
+    <radialGradient id="dusk-glow" cx="80%" cy="30%" r="60%">
+      <stop offset="0%" stop-color="#1E5EFF" stop-opacity="0.30"/>
+      <stop offset="40%" stop-color="#0B2F8A" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#050A17" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="dusk-bar1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#3B7BFF" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#1E5EFF" stop-opacity="0.10"/>
+    </linearGradient>
+    <linearGradient id="dusk-bar2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#609AFF" stop-opacity="0.30"/>
+      <stop offset="100%" stop-color="#3B7BFF" stop-opacity="0.12"/>
+    </linearGradient>
+  </defs>
+  <rect width="2560" height="1440" fill="url(#dusk-bg)"/>
+  <rect width="2560" height="1440" fill="url(#dusk-glow)"/>
+
+  <!-- Centered insignia watermark -->
+  <g transform="translate(1000, 520) scale(1)">
+    <rect x="0" y="0" width="460" height="110" rx="32" fill="url(#dusk-bar1)" stroke="#3B7BFF" stroke-opacity="0.25" stroke-width="1.5"/>
+    <rect x="100" y="145" width="460" height="110" rx="32" fill="url(#dusk-bar2)" stroke="#609AFF" stroke-opacity="0.35" stroke-width="1.5"/>
+    <rect x="0" y="290" width="460" height="110" rx="32" fill="url(#dusk-bar1)" stroke="#1E5EFF" stroke-opacity="0.25" stroke-width="1.5"/>
+  </g>
+</svg>

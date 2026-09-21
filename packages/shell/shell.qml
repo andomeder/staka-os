@@ -36,22 +36,40 @@ ShellRoot {
   readonly property string userConfigPath: home + "/.config/staka/shell.json"
 
   // Bundled fallback so the shell can start even when the default shell.json is
-  // missing or unreadable. The bar config here mirrors the on-disk defaults
-  // closely enough to render a usable bar; not authoritative.
+  // missing or unreadable. The band config here provides the full v2 perimeter
+  // band layout with button for Staka AI on top left.
   readonly property var builtinShellConfig: ({
-    version: 1,
+    version: 2,
+    band: {
+      edges: ["top"],
+      thickness: 44,
+      cornerStyle: "continuous",
+      innerMargin: 10,
+      rounding: 10,
+      activeBorder: "rgba(1E5EFFee) rgba(3B7BFFee) 45deg",
+      inactiveBorder: "rgba(1E2A44aa)",
+      top: {
+        left: [{ id: "staka.menu" }, { id: "staka.ai-panel" }, { id: "staka.workspaces" }, { id: "staka.inline-lyrics" }],
+        center: [{ id: "staka.clock", format: "dddd HH:mm" }, { id: "staka.weather" }],
+        right: [{ id: "staka.hw-monitor" }, { id: "staka.tray" }, { id: "staka.audio" }]
+      },
+      left: { modules: [] },
+      right: { modules: [] },
+      bottom: { modules: [] }
+    },
     idle: {
       screensaver: 150,
       lock: 300
     },
     bar: {
       position: "top",
+      thickness: 44,
       transparent: false,
       centerAnchor: "staka.clock",
       layout: {
-        left: [{ id: "staka.menu" }, { id: "staka.workspaces" }],
-        center: [{ id: "staka.clock", format: "dddd HH:mm" }],
-        right: [{ id: "staka.audio" }, { id: "staka.ai-panel" }]
+        left: [{ id: "staka.menu" }, { id: "staka.ai-panel" }, { id: "staka.workspaces" }, { id: "staka.inline-lyrics" }],
+        center: [{ id: "staka.clock", format: "dddd HH:mm" }, { id: "staka.weather" }],
+        right: [{ id: "staka.hw-monitor" }, { id: "staka.tray" }, { id: "staka.audio" }]
       }
     },
     plugins: []
@@ -78,8 +96,8 @@ ShellRoot {
     if (userText.trim()) {
       try {
         var parsed = JSON.parse(userText)
-        if (Util.isPlainObject(parsed) && parsed.version === 1) user = parsed
-        else if (Util.isPlainObject(parsed)) console.warn("shell.json missing version: 1, using defaults")
+        if (Util.isPlainObject(parsed) && (parsed.version === 1 || parsed.version === 2)) user = parsed
+        else if (Util.isPlainObject(parsed)) console.warn("shell.json missing version: 1 or 2, using defaults")
       } catch (e) {
         console.warn("shell.json parse failed, using defaults:", e)
       }
@@ -96,7 +114,7 @@ ShellRoot {
     }
     try {
       var parsed = JSON.parse(text)
-      if (Util.isPlainObject(parsed) && parsed.version === 1) defaultsConfig = parsed
+      if (Util.isPlainObject(parsed) && (parsed.version === 1 || parsed.version === 2)) defaultsConfig = parsed
       else defaultsConfig = builtinShellConfig
     } catch (e) {
       console.warn("default shell.json parse failed, using builtin:", e)
@@ -108,13 +126,20 @@ ShellRoot {
   function persistShellConfig(nextConfig) {
     suppressUserReload = true
     var payload = JSON.parse(JSON.stringify(nextConfig))
-    payload.version = 1
+    if (!payload.version) payload.version = 2
     shellConfig = payload
     userConfigFile.setText(JSON.stringify(payload, null, 2) + "\n")
   }
 
   readonly property var barConfig: shellConfig && Util.isPlainObject(shellConfig.bar) ? shellConfig.bar : builtinShellConfig.bar
   onBarConfigChanged: if (bar && "barConfig" in bar) bar.barConfig = shell.barConfig
+
+  // Band geometry coupler for automatic Hyprland gaps, rounding, and border sync
+  BandCoupler {
+    id: bandCoupler
+    shell: shell
+  }
+
   FileView {
     id: defaultsFile
     path: shell.defaultsPath
@@ -229,25 +254,87 @@ ShellRoot {
     shell.bar = target
   }
 
-  Component {
-    id: defaultBarComponent
+  // --------------------------------------------------- Band Rails Instantiation
+  readonly property var bandEdges: {
+    if (shell.shellConfig && shell.shellConfig.band && Array.isArray(shell.shellConfig.band.edges) && shell.shellConfig.band.edges.length > 0)
+      return shell.shellConfig.band.edges
+    return [shell.barConfig && shell.barConfig.position ? shell.barConfig.position : "top"]
+  }
 
-    Bar {
-      stakaPath: shell.stakaPath
-      barWidgetRegistry: shell.barWidgetRegistry
-      barConfig: shell.barConfig
-      shell: shell
-      manifest: shell.barManifestFor(shell.defaultBarId)
+  function configForEdge(edgeName) {
+    var base = shell.barConfig || builtinShellConfig.bar
+    var band = (shell.shellConfig && shell.shellConfig.band) ? shell.shellConfig.band : null
+    var thickness = (band && Number(band.thickness) > 0) ? Number(band.thickness) : (base && Number(base.thickness) > 0 ? Number(base.thickness) : 44)
+    var transparent = (band && band.transparent !== undefined) ? band.transparent : (base && base.transparent ? base.transparent : false)
+    var cfg = {
+      position: edgeName,
+      thickness: thickness,
+      transparent: transparent,
+      centerAnchor: (base && base.centerAnchor) ? base.centerAnchor : "staka.clock",
+      layout: { left: [], center: [], right: [] }
+    }
+    if (band) {
+      if (edgeName === "top" && band.top) {
+        cfg.layout = band.top
+      } else if (edgeName === "bottom" && band.bottom) {
+        cfg.layout = band.bottom
+      } else if (edgeName === "left" && band.left) {
+        cfg.layout = { left: band.left.modules || [], center: [], right: [] }
+      } else if (edgeName === "right" && band.right) {
+        cfg.layout = { left: band.right.modules || [], center: [], right: [] }
+      }
+    } else if (base && base.layout) {
+      cfg.layout = base.layout
+    }
+    return cfg
+  }
+
+  property var barInstances: ({})
+
+  function registerBarInstance(edge, barItem) {
+    var next = ({})
+    for (var k in barInstances) next[k] = barInstances[k]
+    next[edge] = barItem
+    barInstances = next
+    if (edge === "top" || !shell.bar) {
+      shell.configureBar(barItem, shell.barManifestFor(shell.defaultBarId))
     }
   }
 
-  Loader {
-    id: defaultBarLoader
+  function unregisterBarInstance(edge) {
+    if (!barInstances[edge]) return
+    var next = ({})
+    for (var k in barInstances) if (k !== edge) next[k] = barInstances[k]
+    barInstances = next
+    if (shell.bar === barInstances[edge]) {
+      shell.bar = next["top"] || null
+    }
+  }
 
+  Instantiator {
+    id: bandBarsInstantiator
+    model: (shell.activeBarId === shell.defaultBarId) ? shell.bandEdges : []
     active: shell.activeBarId === shell.defaultBarId
-    sourceComponent: defaultBarComponent
-    onLoaded: shell.configureBar(item, shell.barManifestFor(shell.defaultBarId))
-    onActiveChanged: if (!active && shell.activeBarId !== shell.defaultBarId) shell.bar = null
+
+    delegate: QtObject {
+      id: edgeBarDelegate
+      required property var modelData
+      readonly property string edgeName: String(modelData)
+
+      property var edgeConfig: shell.configForEdge(edgeBarDelegate.edgeName)
+
+      property Bar barItem: Bar {
+        stakaPath: shell.stakaPath
+        barWidgetRegistry: shell.barWidgetRegistry
+        barConfig: edgeBarDelegate.edgeConfig
+        position: edgeBarDelegate.edgeName
+        shell: shell
+        manifest: shell.barManifestFor(shell.defaultBarId)
+
+        Component.onCompleted: shell.registerBarInstance(edgeBarDelegate.edgeName, this)
+        Component.onDestruction: shell.unregisterBarInstance(edgeBarDelegate.edgeName)
+      }
+    }
   }
 
   Loader {
@@ -462,8 +549,17 @@ ShellRoot {
     }
     // Bar widgets take no payload; payloadJson is dropped on this path.
     if (shell.isBarWidgetPanelPlugin(id)) {
-      var summoned = shell.bar && typeof shell.bar.summonBarWidget === "function"
-        && shell.bar.summonBarWidget(id)
+      var summoned = false
+      for (var edge in shell.barInstances) {
+        var b = shell.barInstances[edge]
+        if (b && typeof b.summonBarWidget === "function" && b.summonBarWidget(id)) {
+          summoned = true
+          break
+        }
+      }
+      if (!summoned && shell.bar && typeof shell.bar.summonBarWidget === "function") {
+        summoned = shell.bar.summonBarWidget(id)
+      }
       if (!summoned) console.warn("summon: no live bar widget for:", id)
       return summoned === true
     }
@@ -489,8 +585,17 @@ ShellRoot {
     var id = String(pluginId || "")
     if (!id) return false
     if (shell.isBarWidgetPanelPlugin(id)) {
-      var hidden = shell.bar && typeof shell.bar.hideBarWidget === "function"
-        && shell.bar.hideBarWidget(id)
+      var hidden = false
+      for (var edge in shell.barInstances) {
+        var b = shell.barInstances[edge]
+        if (b && typeof b.hideBarWidget === "function" && b.hideBarWidget(id)) {
+          hidden = true
+          break
+        }
+      }
+      if (!hidden && shell.bar && typeof shell.bar.hideBarWidget === "function") {
+        hidden = shell.bar.hideBarWidget(id)
+      }
       if (!hidden) console.warn("hide: no live bar widget for:", id)
       return hidden === true
     }
@@ -505,6 +610,11 @@ ShellRoot {
   function isPluginOpen(pluginId) {
     var id = String(pluginId || "")
     if (shell.isBarWidgetPanelPlugin(id)) {
+      for (var edge in shell.barInstances) {
+        var b = shell.barInstances[edge]
+        if (b && typeof b.isBarWidgetOpen === "function" && b.isBarWidgetOpen(id))
+          return true
+      }
       return shell.bar && typeof shell.bar.isBarWidgetOpen === "function"
         ? shell.bar.isBarWidgetOpen(id)
         : false
@@ -870,6 +980,14 @@ ShellRoot {
       Color.loadShell(shellRaw)
       Style.scheduleRefresh()
       return "ok"
+    }
+
+    function applyBand(): string {
+      if (bandCoupler && typeof bandCoupler.applyToHyprland === "function") {
+        bandCoupler.applyToHyprland()
+        return "ok"
+      }
+      return "unavailable"
     }
 
     function rescanPlugins(): void {

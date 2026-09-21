@@ -1,0 +1,68 @@
+{
+  "version": 2,
+  "band": {
+    "edges": [
+      "top"
+    ],
+    "thickness": 44,
+    "cornerStyle": "continuous",
+    "innerMargin": 10,
+    "rounding": 10,
+    "activeBorder": "rgba(1E5EFFee) rgba(3B7BFFee) 45deg",
+    "inactiveBorder": "rgba(1E2A44aa)",
+    "top": {
+      "left": [
+        { "id": "staka.menu" },
+        { "id": "staka.ai-panel" },
+        { "id": "staka.workspaces" },
+        { "id": "staka.inline-lyrics" }
+      ],
+      "center": [
+        { "id": "staka.clock", "format": "dddd HH:mm" },
+        { "id": "staka.weather" }
+      ],
+      "right": [
+        { "id": "staka.hw-monitor" },
+        { "id": "staka.tray" },
+        { "id": "staka.audio" }
+      ]
+    },
+    "left": {
+      "modules": []
+    },
+    "right": {
+      "modules": []
+    },
+    "bottom": {
+      "modules": []
+    }
+  },
+  "bar": {
+    "position": "top",
+    "thickness": 44,
+    "transparent": false,
+    "centerAnchor": "staka.clock",
+    "layout": {
+      "left": [
+        { "id": "staka.menu" },
+        { "id": "staka.ai-panel" },
+        { "id": "staka.workspaces" },
+        { "id": "staka.inline-lyrics" }
+      ],
+      "center": [
+        { "id": "staka.clock", "format": "dddd HH:mm" },
+        { "id": "staka.weather" }
+      ],
+      "right": [
+        { "id": "staka.hw-monitor" },
+        { "id": "staka.tray" },
+        { "id": "staka.audio" }
+      ]
+    }
+  },
+  "idle": {
+    "screensaver": 150,
+    "lock": 300
+  },
+  "plugins": []
+}
