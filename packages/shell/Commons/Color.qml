@@ -16,9 +16,12 @@ QtObject {
   readonly property string stateHome: home + "/.local/state"
   readonly property string currentThemePath: stateHome + "/staka/current/theme"
 
-  property color foreground: "#cacccc"
-  property color background: "#101315"
-  property color accent: "#cacccc"
+  // Fallback palette when no theme is installed (fresh installs before the
+  // first theme is generated). Uses the Staka brand colors so the shell
+  // renders correctly instead of relying on undefined theme data.
+  property color foreground: "#e8eef9"
+  property color background: "#0b1220"
+  property color accent: "#1e5eff"
   property color urgent: "#a55555"
   property color muted: "#707880"
 
