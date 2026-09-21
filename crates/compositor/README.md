@@ -14,7 +14,13 @@ socket.
 
 - `src/ipc.rs` - length-prefixed frame protocol and control message types
 - `src/hyprctl.rs` - `hyprctl` wrapper: headless output create/remove, output
-  list, workspace dispatch
+  and workspace listing, dispatchers (auto-detects the legacy and Lua IPC
+  syntaxes of Hyprland 0.55+)
+- `src/workspace.rs` - agent workspace selection, adoption, pinning, and
+  layout restore on teardown
+- `src/cage.rs` - nested cage compositor lifecycle: spawn, socket wait,
+  clean termination
+- `src/screencopy.rs` - PNG capture of the headless output via `grim`
 - `src/server.rs` - Unix socket server dispatching commands
 - `src/main.rs` - `staka-compositor` binary
 - `tests/integration_hyprland.rs` - tests that need a live Hyprland session
@@ -53,15 +59,33 @@ Commands:
 
 | cmd | args | notes |
 |---|---|---|
-| `create_workspace` | `{ "app": null }` | creates a headless output; returns `{ "output": "HEADLESS-N" }` |
-| `run_app` | `{ "app": "..." }` | nested compositor lifecycle pending |
-| `screenshot` | `{ "format": "png" }` | pending; will return a binary frame |
+| `create_workspace` | `{ "app": "..." }` | headless output + dedicated agent workspace; with `app`, launches cage with that app inside. Returns `{ "output": "HEADLESS-N", "workspace": "staka-agent-N", "cage_pid": N, "socket": "staka-cage" }` |
+| `run_app` | `{ "app": "..." }` | launches an extra app inside the running cage |
+| `screenshot` | `{ "format": "png" }` | captures the headless output; returns a binary frame |
 | `click` | `{ "x": 320, "y": 240, "button": "left" }` | pending; virtual pointer |
 | `move_pointer` | `{ "x": 320, "y": 240 }` | pending; virtual pointer |
 | `type` | `{ "text": "hello" }` | pending; virtual keyboard |
 | `key` | `{ "keys": ["ctrl", "s"] }` | pending; virtual keyboard |
-| `teardown` | `{}` | removes headless outputs created by this driver |
+| `teardown` | `{}` | kills the cage and its apps, gives back any hijacked workspace, removes the headless output |
 | `health` | | checks Hyprland reachability |
 
 Commands marked pending return an explicit "not implemented" error until the
-nested compositor (cage), screencopy, and virtual input land.
+virtual input client lands (`crates/compositor/src/input.rs`).
+
+## Workspace safety
+
+Agent workspaces are named workspaces prefixed with `staka-agent-`, so they
+can never shadow a user keybind like `Super+2`. Creating a headless output
+makes Hyprland grab a workspace for it; when that grab takes a fresh empty
+workspace the driver adopts it (renames it to the agent name), and when it
+takes one of the user's workspaces the driver pins its own workspace to the
+invisible output first and then gives the user's workspace back. Teardown
+kills the cage, restores the user's layout from a snapshot taken before
+anything was touched, and removes the output.
+
+## Cage fork
+
+The nested compositor is the vendored waydroid-helper cage fork with virtual
+input support - see `vendor/cage/BUILD.md` for provenance and build steps.
+The binary is expected on `PATH` as `cage` when `create_workspace` is called
+with an app.
