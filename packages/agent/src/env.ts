@@ -10,6 +10,8 @@ const EnvSchema = z.object({
   STAKA_MODEL_ID: z.string().optional(),
   STAKA_MODEL_API_KEY: z.string().optional(),
   STAKA_MODEL_BASE_URL: z.string().optional(),
+  STAKA_MODEL_CONTEXT_WINDOW: z.coerce.number().optional(),
+  STAKA_MODEL_MAX_TOKENS: z.coerce.number().optional(),
   STAKA_HEARTBEAT_INTERVAL_MS: z.coerce.number().default(60_000),
   STAKA_CONFIG_REFRESH_MS: z.coerce.number().default(300_000),
 });

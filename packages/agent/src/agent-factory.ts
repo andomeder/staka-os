@@ -1,6 +1,7 @@
 import { Agent, convertToLlm, type StreamFn } from "@earendil-works/pi-agent-core";
 import { getBuiltinModel, getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
+import type { Model } from "@earendil-works/pi-ai";
 import type { Env } from "./env.ts";
 import { createOrgTools } from "./tools/org.ts";
 import { createSkillsTools } from "./tools/skills.ts";
@@ -21,10 +22,36 @@ export type CreateAgentDeps = {
   sessionId?: string;
 };
 
-function resolveModel(env: Env) {
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+
+function resolveModel(env: Env): Model | undefined {
   const provider = env.STAKA_MODEL_PROVIDER ?? "anthropic";
   const modelId = env.STAKA_MODEL_ID ?? getBuiltinModels(provider as never)[0]?.id;
-  return getBuiltinModel(provider as never, modelId as never);
+  const builtin = getBuiltinModel(provider as never, modelId as never);
+  if (builtin) return builtin;
+  if (provider === "openrouter" && modelId) {
+    // Model IDs published after the bundled catalog still work through the
+    // OpenAI-compatible endpoint; cost stays zero because usage billing is
+    // handled by the provider account.
+    return {
+      id: modelId,
+      name: modelId,
+      api: "openai-completions",
+      provider: "openrouter",
+      baseUrl: env.STAKA_MODEL_BASE_URL ?? OPENROUTER_BASE_URL,
+      compat: {
+        supportsDeveloperRole: false,
+        thinkingFormat: "openrouter",
+        requiresReasoningContentOnAssistantMessages: true,
+      },
+      reasoning: true,
+      input: ["text"],
+      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      contextWindow: env.STAKA_MODEL_CONTEXT_WINDOW ?? 131_072,
+      maxTokens: env.STAKA_MODEL_MAX_TOKENS ?? 8_192,
+    };
+  }
+  return builtin;
 }
 
 function buildSystemPrompt(orgName?: string | null, skills?: SourcedSkill[]): string {
