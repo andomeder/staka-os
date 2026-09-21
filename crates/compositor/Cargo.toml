@@ -1,0 +1,22 @@
+[package]
+name = "staka-compositor"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Headless workspace compositor driver for Staka"
+
+[lib]
+name = "staka_compositor"
+path = "src/lib.rs"
+
+[[bin]]
+name = "staka-compositor"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[features]
+# Tests that need a live Hyprland session (hyprctl on PATH).
+integration = []
