@@ -25,7 +25,7 @@ export type CreateAgentDeps = {
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
-function resolveModel(env: Env): Model | undefined {
+export function resolveModel(env: Env): Model | undefined {
   const provider = env.STAKA_MODEL_PROVIDER ?? "anthropic";
   const modelId = env.STAKA_MODEL_ID ?? getBuiltinModels(provider as never)[0]?.id;
   const builtin = getBuiltinModel(provider as never, modelId as never);

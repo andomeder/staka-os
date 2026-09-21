@@ -73,7 +73,7 @@ install_shell() {
     {
       echo ""
       echo "# Staka AI panel (Super+A) + shell autostart"
-      echo "bind = SUPER, A, exec, $HOME/.local/bin/staka-toggle-panel"
+      echo "bind = SUPER, A, exec, env STAKA_SHELL_PATH=$HOME/.local/share/staka $HOME/.local/bin/staka-toggle-panel"
       echo "exec-once = quickshell -p $HOME/.local/share/staka/shell"
     } >> "$HYPRLAND_CONF"
     echo "wired staka shell into hyprland config"
