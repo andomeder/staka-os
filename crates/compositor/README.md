@@ -72,6 +72,30 @@ Commands:
 Commands marked pending return an explicit "not implemented" error until the
 virtual input client lands (`crates/compositor/src/input.rs`).
 
+The TypeScript agent speaks this protocol from
+`packages/agent/src/tools/compositor.ts` (the `compositor_*` agent tools).
+Its app launcher uses a fixed allowlist mapping `terminal` -> `foot`,
+`calculator` -> `gnome-calculator`, `spreadsheet` -> `libreoffice --calc`,
+and `writer` -> `libreoffice --writer`, so the ISO needs to provide those
+apps for the agent to launch anything.
+
+## ISO packaging
+
+The ISO must ship both binaries or the agent's headless workspace has
+nothing to talk to:
+
+- `staka-compositor` - this crate, built with `cargo build --release` in
+  `crates/`, installed on `PATH`.
+- `cage` - the vendored fork under `vendor/cage/` (build steps in
+  `vendor/cage/BUILD.md`), installed on `PATH`. The driver expects to find
+  it by name when `create_workspace` is called with an app.
+- The apps the agent allowlist launches: `foot`, `gnome-calculator`, and
+  `libreoffice`.
+
+Without the driver binary running inside the Hyprland session (socket
+`$XDG_RUNTIME_DIR/staka/compositor.sock`) the agent tools degrade to a
+"compositor driver not available" message rather than failing.
+
 ## Workspace safety
 
 Agent workspaces are named workspaces prefixed with `staka-agent-`, so they

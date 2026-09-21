@@ -8,6 +8,7 @@ import { createSkillsTools } from "./tools/skills.ts";
 import { createSkillManageTool } from "./tools/skill-manage.ts";
 import { createMemoryTool } from "./tools/memory.ts";
 import { createSessionSearchTool } from "./tools/session-search.ts";
+import { createCompositorTools } from "./tools/compositor.ts";
 import { buildMemoryPromptBlock } from "./memory/personal.ts";
 import { buildSkillsIndex, type SourcedSkill } from "./skills/loader.ts";
 
@@ -93,7 +94,15 @@ export function createAgent(deps: CreateAgentDeps): Agent {
   });
   const memoryTool = createMemoryTool();
   const sessionSearchTool = createSessionSearchTool();
-  const tools = [...orgTools, ...skillsTools, skillManageTool, memoryTool, sessionSearchTool];
+  const compositorTools = createCompositorTools();
+  const tools = [
+    ...orgTools,
+    ...skillsTools,
+    skillManageTool,
+    memoryTool,
+    sessionSearchTool,
+    ...compositorTools,
+  ];
   return new Agent({
     initialState: {
       systemPrompt: buildSystemPrompt(deps.orgName, skills),
