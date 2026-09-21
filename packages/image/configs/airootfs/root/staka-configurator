@@ -621,6 +621,7 @@ cat <<-_EOF_ >user_configuration.json
         "base-devel",
         "git",
         "omarchy-keyring",
+        "quickshell",
         "snapper"
     ],
     "profile_config": {

@@ -57,7 +57,7 @@ install_staka_agent() {
   cp /root/staka-agent-setup.sh /mnt/root/staka-agent-setup.sh
   chmod +x /mnt/root/staka-agent-setup.sh
 
-  chroot_bash /root/staka-agent-setup.sh
+  chroot_bash env STAKA_SETUP_USER="$OMARCHY_USER" /root/staka-agent-setup.sh
   rm -f /mnt/root/staka-agent-setup.sh
 }
 
