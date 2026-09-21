@@ -140,6 +140,23 @@ mapfile -t other_pkgs < <(grep -v '^#' "$OMARCHY_DST/install/omarchy-other.packa
 mapfile -t archinstall_pkgs < <(grep -v '^#' /builder/archinstall.packages | grep -v '^$' || true)
 all_packages+=("${base_pkgs[@]}" "${other_pkgs[@]}" "${archinstall_pkgs[@]}")
 
+# The omarchy mirror is rolling: packages can disappear between builds, and
+# a single unresolvable target would abort the whole build. Sync the repo
+# databases, then drop targets that no enabled repo carries, loudly.
+pacman --config "/configs/pacman-online-${OMARCHY_MIRROR}.conf" --noconfirm -Sy >/dev/null
+mapfile -t repo_packages < <(pacman --config "/configs/pacman-online-${OMARCHY_MIRROR}.conf" -Slq 2>/dev/null | sort -u)
+declare -A repo_pkg_map=()
+for repo_pkg in "${repo_packages[@]}"; do repo_pkg_map["$repo_pkg"]=1; done
+filtered_packages=()
+for pkg in "${all_packages[@]}"; do
+  if [[ -n ${repo_pkg_map["$pkg"]:-} ]]; then
+    filtered_packages+=("$pkg")
+  else
+    echo "WARNING: package not in any enabled repo, excluding from ISO: $pkg" >&2
+  fi
+done
+all_packages=("${filtered_packages[@]}")
+
 mkdir -p /tmp/offlinedb
 # -Syw fills offline_mirror_dir; bind-mounted host offline-cache reuses *.pkg.tar.zst next time
 pacman --config "/configs/pacman-online-${OMARCHY_MIRROR}.conf" --noconfirm -Syw "${all_packages[@]}" \
