@@ -20,6 +20,8 @@ socket.
   layout restore on teardown
 - `src/cage.rs` - nested cage compositor lifecycle: spawn, socket wait,
   clean termination
+- `src/input.rs` - virtual pointer and keyboard injection into cage's seat
+  via `zwlr_virtual_pointer_v1` and `zwp_virtual_keyboard_v1`
 - `src/screencopy.rs` - PNG capture of the headless output via `grim`
 - `src/server.rs` - Unix socket server dispatching commands
 - `src/main.rs` - `staka-compositor` binary
@@ -62,15 +64,17 @@ Commands:
 | `create_workspace` | `{ "app": "..." }` | headless output + dedicated agent workspace; with `app`, launches cage with that app inside. Returns `{ "output": "HEADLESS-N", "workspace": "staka-agent-N", "cage_pid": N, "socket": "staka-cage" }` |
 | `run_app` | `{ "app": "..." }` | launches an extra app inside the running cage |
 | `screenshot` | `{ "format": "png" }` | captures the headless output; returns a binary frame |
-| `click` | `{ "x": 320, "y": 240, "button": "left" }` | pending; virtual pointer |
-| `move_pointer` | `{ "x": 320, "y": 240 }` | pending; virtual pointer |
-| `type` | `{ "text": "hello" }` | pending; virtual keyboard |
-| `key` | `{ "keys": ["ctrl", "s"] }` | pending; virtual keyboard |
+| `click` | `{ "x": 320, "y": 240, "button": "left" }` | virtual pointer click at headless-output coordinates |
+| `move_pointer` | `{ "x": 320, "y": 240 }` | virtual pointer move |
+| `type` | `{ "text": "hello" }` | virtual keyboard text; ASCII only, shifted glyphs via the shift modifier |
+| `key` | `{ "keys": ["ctrl", "s"] }` | virtual keyboard chord; modifiers held around the last key |
 | `teardown` | `{}` | kills the cage and its apps, gives back any hijacked workspace, removes the headless output |
 | `health` | | checks Hyprland reachability |
 
-Commands marked pending return an explicit "not implemented" error until the
-virtual input client lands (`crates/compositor/src/input.rs`).
+Input commands connect to the cage socket lazily on first use and reuse the
+connection. The virtual keyboard installs a standard US keymap (wlroots
+drops key events from keymap-less virtual keyboards) and raises the shift
+modifier through the protocol's `modifiers` request for shifted glyphs.
 
 The TypeScript agent speaks this protocol from
 `packages/agent/src/tools/compositor.ts` (the `compositor_*` agent tools).

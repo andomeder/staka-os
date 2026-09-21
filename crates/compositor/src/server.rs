@@ -5,10 +5,10 @@
 //! `create_workspace` captures the user's layout, creates a headless
 //! output, launches the nested cage compositor with the requested app, and
 //! pins a dedicated named agent workspace to the invisible output.
-//! `screenshot` captures that output. `teardown` reverses everything and
-//! restores the user's layout. Virtual input (click/type/key) still needs
-//! the Wayland input client and is dispatched as an explicit "not
-//! implemented" error.
+//! `screenshot` captures that output. Virtual input commands (click,
+//! move, type, key) connect to cage's Wayland socket on first use and
+//! inject into cage's seat only - never the user's physical seat.
+//! `teardown` reverses everything and restores the user's layout.
 
 use std::io::{self, Write};
 use std::os::unix::net::UnixStream;
@@ -16,8 +16,9 @@ use std::path::PathBuf;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crate::cage::{split_app, CageConfig, CageSession, ChildProcess, ProcessSpawner, SystemSpawner};
+use crate::cage::{cage_socket_path, split_app, CageConfig, CageSession, ChildProcess, ProcessSpawner, SystemSpawner};
 use crate::hyprctl::{Client, CommandRunner, HyprCtl, HyprError};
+use crate::input::{InputConnector, InputError, VirtualSeat, WaylandInputConnector};
 use crate::ipc::{
     encode_response, parse_request, read_frame, Command, Frame, Request, Response, ImageFormat,
     FRAME_TYPE_JSON,
@@ -37,27 +38,38 @@ pub struct ActiveSession {
     pub workspace: String,
     pub layout: LayoutSnapshot,
     pub cage: Option<CageSession>,
+    /// Nested output geometry; virtual-input coordinates are relative to
+    /// it (zero when no cage is running).
+    pub cage_width: u32,
+    pub cage_height: u32,
+    /// Live virtual-input connection to cage's seat, created lazily on
+    /// the first input command and reused until teardown.
+    pub input: Option<Box<dyn VirtualSeat>>,
     /// Apps launched into the cage; killed on teardown. Cage's own death
     /// takes the apps with it, but explicit kills keep teardown
     /// deterministic.
     pub apps: Vec<Box<dyn ChildProcess>>,
 }
 
-pub struct ServerState<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner> {
+pub struct ServerState<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner, I: InputConnector> {
     hyprctl: HyprCtl<C>,
     spawner: S,
     capture: G,
+    input: I,
     cage_binary: PathBuf,
     /// Runtime dir where the cage Wayland socket appears.
     runtime_dir: PathBuf,
     session: Mutex<Option<ActiveSession>>,
 }
 
-impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner> ServerState<C, S, G> {
+impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner, I: InputConnector>
+    ServerState<C, S, G, I>
+{
     pub fn new(
         hyprctl: HyprCtl<C>,
         spawner: S,
         capture: G,
+        input: I,
         cage_binary: impl Into<PathBuf>,
         runtime_dir: impl Into<PathBuf>,
     ) -> Self {
@@ -65,6 +77,7 @@ impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner> ServerState<C, S, G>
             hyprctl,
             spawner,
             capture,
+            input,
             cage_binary: cage_binary.into(),
             runtime_dir: runtime_dir.into(),
             session: Mutex::new(None),
@@ -92,10 +105,22 @@ impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner> ServerState<C, S, G>
             Command::RunApp { app } => self.handle_run_app(id, app),
             Command::Screenshot { format } => self.handle_screenshot(id, *format),
             Command::Teardown {} => self.handle_teardown(id),
-            Command::Click { .. } => not_implemented(id, "click"),
-            Command::MovePointer { .. } => not_implemented(id, "move_pointer"),
-            Command::TypeText { .. } => not_implemented(id, "type"),
-            Command::PressKeys { .. } => not_implemented(id, "key"),
+            Command::Click { x, y, button } => self.handle_input_command(
+                id,
+                "click",
+                move |seat, w, h| seat.click(*x, *y, *button, w, h),
+            ),
+            Command::MovePointer { x, y } => self.handle_input_command(
+                id,
+                "move",
+                move |seat, w, h| seat.move_pointer(*x, *y, w, h),
+            ),
+            Command::TypeText { text } => {
+                self.handle_input_command(id, "type", move |seat, _, _| seat.type_text(text))
+            }
+            Command::PressKeys { keys } => {
+                self.handle_input_command(id, "key", move |seat, _, _| seat.press_keys(keys))
+            }
         }
     }
 
@@ -148,9 +173,15 @@ impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner> ServerState<C, S, G>
         // Launch cage with the app inside, then move its window silently
         // onto the dedicated agent workspace on the invisible output. The
         // user's focused workspace never changes.
+        let mut cage_width: u32 = 0;
+        let mut cage_height: u32 = 0;
         let cage = match app {
             Some(app) => match self.launch_cage(&manager, &workspace, &output, app, !was_adopted) {
-                Ok(cage) => Some(cage),
+                Ok((cage, width, height)) => {
+                    cage_width = width;
+                    cage_height = height;
+                    Some(cage)
+                }
                 Err(e) => return self.fail_create(id, &output, layout, e),
             },
             None => None,
@@ -168,6 +199,9 @@ impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner> ServerState<C, S, G>
             workspace: workspace.clone(),
             layout,
             cage,
+            cage_width,
+            cage_height,
+            input: None,
             apps: Vec::new(),
         });
 
@@ -205,7 +239,7 @@ impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner> ServerState<C, S, G>
         output: &str,
         app: &str,
         needs_pin: bool,
-    ) -> Result<CageSession, HyprError> {
+    ) -> Result<(CageSession, u32, u32), HyprError> {
         let wayland_display = std::env::var("WAYLAND_DISPLAY").map_err(|_| {
             HyprError::Parse(
                 "WAYLAND_DISPLAY is not set; cannot launch the nested compositor".to_string(),
@@ -219,8 +253,9 @@ impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner> ServerState<C, S, G>
             app: app.to_string(),
             ..Default::default()
         };
-        let session =
-            CageSession::spawn(&self.spawner, &config).map_err(|e| HyprError::Parse(e.to_string()))?;
+        let session = CageSession::spawn(&self.spawner, &config)
+            .map_err(|e| HyprError::Parse(e.to_string()))?;
+        let geometry = (config.width, config.height);
 
         // Wait for Hyprland to see the cage window, then move it silently
         // onto the dedicated agent workspace. The user's focused workspace
@@ -236,7 +271,44 @@ impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner> ServerState<C, S, G>
                 .pin_to_output(workspace, output)
                 .map_err(|e| HyprError::Parse(format!("workspace pin failed: {}", e)))?;
         }
-        Ok(session)
+        Ok((session, geometry.0, geometry.1))
+    }
+
+    /// Runs one virtual-input operation against cage's seat. The
+    /// connection to cage's socket is created lazily on first use and
+    /// reused; coordinates are relative to the nested output geometry.
+    fn handle_input_command<F>(&self, id: u64, op: &str, command: F) -> Handled
+    where
+        F: FnOnce(&mut dyn VirtualSeat, u32, u32) -> Result<(), InputError>,
+    {
+        let mut session_guard = self.session.lock().unwrap();
+        let Some(session) = session_guard.as_mut() else {
+            return error(id, "no active workspace; create one first");
+        };
+        let (socket, width, height) = match session.cage.as_ref() {
+            Some(cage) => (
+                cage_socket_path(&cage.socket_dir, &cage.socket_name),
+                session.cage_width,
+                session.cage_height,
+            ),
+            None => {
+                return error(id, "the nested compositor is not running in this workspace");
+            }
+        };
+        if session.input.is_none() {
+            match self.input.connect(&socket) {
+                Ok(seat) => session.input = Some(seat),
+                Err(e) => return error(id, format!("{} failed: {}", op, e)),
+            }
+        }
+        let seat = session.input.as_mut().expect("input set above");
+        match command(seat.as_mut(), width, height) {
+            Ok(()) => Handled {
+                response: Response::ok(id),
+                binary: None,
+            },
+            Err(e) => error(id, format!("{} failed: {}", op, e)),
+        }
     }
 
     fn handle_run_app(&self, id: u64, app: &str) -> Handled {
@@ -355,15 +427,17 @@ impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner> ServerState<C, S, G>
     }
 }
 
-impl ServerState<crate::hyprctl::SystemRunner, SystemSpawner, GrimCapture> {
+impl ServerState<crate::hyprctl::SystemRunner, SystemSpawner, GrimCapture, WaylandInputConnector> {
     /// The real driver state: hyprctl on PATH, grim for capture, cage on
-    /// PATH, sockets in the session runtime dir.
+    /// PATH, virtual input into cage's socket, sockets in the session
+    /// runtime dir.
     pub fn system() -> Self {
         let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
         ServerState::new(
             HyprCtl::system(),
             SystemSpawner,
             GrimCapture::default(),
+            WaylandInputConnector,
             "cage",
             runtime_dir,
         )
@@ -385,19 +459,6 @@ fn error(id: u64, e: impl std::fmt::Display) -> Handled {
 }
 
 const SIGTERM: i32 = 15;
-
-fn not_implemented(id: u64, cmd: &str) -> Handled {
-    Handled {
-        response: Response::err(
-            id,
-            format!(
-                "{} is not implemented yet; virtual input lands with the Wayland input client",
-                cmd
-            ),
-        ),
-        binary: None,
-    }
-}
 
 /// Polls `hyprctl clients -j` until a client whose pid matches appears.
 fn wait_for_client<C: CommandRunner>(
@@ -438,10 +499,13 @@ fn ctl_pid_exited(pid: u32) -> io::Result<Option<()>> {
 /// Serves one connection: request frame in, response frame out, until the
 /// peer closes. Malformed requests get an error response with id 0 (the id
 /// cannot be recovered from an unparsable payload).
-pub fn serve_connection<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner>(
-    stream: &mut UnixStream,
-    state: &ServerState<C, S, G>,
-) -> io::Result<()> {
+pub fn serve_connection<C, S, G, I>(stream: &mut UnixStream, state: &ServerState<C, S, G, I>) -> io::Result<()>
+where
+    C: CommandRunner,
+    S: ProcessSpawner,
+    G: CaptureRunner,
+    I: InputConnector,
+{
     loop {
         let frame = match read_frame(stream)? {
             Some(frame) => frame,
@@ -805,6 +869,75 @@ mod tests {
         }
     }
 
+    // --- Virtual input mocks ---
+
+    /// Records high-level seat operations instead of Wayland requests.
+    struct MockSeat {
+        log: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl VirtualSeat for MockSeat {
+        fn move_pointer(&mut self, x: i32, y: i32, w: u32, h: u32) -> Result<(), InputError> {
+            self.log.lock().unwrap().push(format!("move {x} {y} {w} {h}"));
+            Ok(())
+        }
+        fn click(
+            &mut self,
+            x: i32,
+            y: i32,
+            button: MouseButton,
+            w: u32,
+            h: u32,
+        ) -> Result<(), InputError> {
+            self.log
+                .lock()
+                .unwrap()
+                .push(format!("click {} {} {:?} {w} {h}", x, y, button));
+            Ok(())
+        }
+        fn type_text(&mut self, text: &str) -> Result<(), InputError> {
+            self.log.lock().unwrap().push(format!("type {text}"));
+            Ok(())
+        }
+        fn press_keys(&mut self, keys: &[String]) -> Result<(), InputError> {
+            self.log.lock().unwrap().push(format!("keys {}", keys.join("+")));
+            Ok(())
+        }
+        fn flush(&mut self) -> Result<(), InputError> {
+            Ok(())
+        }
+    }
+
+    /// Hands out recording seats; counts connections and can fail.
+    struct MockConnector {
+        log: Arc<Mutex<Vec<String>>>,
+        fail: bool,
+        connections: std::sync::atomic::AtomicUsize,
+    }
+
+    impl MockConnector {
+        fn new() -> Self {
+            MockConnector {
+                log: Arc::new(Mutex::new(Vec::new())),
+                fail: false,
+                connections: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl InputConnector for MockConnector {
+        fn connect(&self, _socket: &std::path::Path) -> Result<Box<dyn VirtualSeat>, InputError> {
+            self.connections
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if self.fail {
+                return Err(InputError::Connect("connection refused".to_string()));
+            }
+            Ok(Box::new(MockSeat {
+                log: self.log.clone(),
+            }))
+        }
+    }
+
     fn ws(id: i64, name: &str, monitor: &str, windows: u32) -> crate::hyprctl::Workspace {
         crate::hyprctl::Workspace {
             id,
@@ -834,7 +967,7 @@ mod tests {
 
     fn make_server(
         state: Arc<MockState>,
-    ) -> ServerState<MockHyprland, MockSpawner, MockCapture> {
+    ) -> ServerState<MockHyprland, MockSpawner, MockCapture, MockConnector> {
         let runtime_dir = unique_runtime_dir();
         ServerState::new(
             HyprCtl::new(MockHyprland { state: state.clone() }),
@@ -845,6 +978,7 @@ mod tests {
                 next_pid: Mutex::new(4242),
             },
             MockCapture,
+            MockConnector::new(),
             "/usr/bin/cage",
             runtime_dir,
         )
@@ -1105,6 +1239,7 @@ mod tests {
                 HyprCtl::new(MockHyprland { state: mock.clone() }),
                 spawner,
                 MockCapture,
+                MockConnector::new(),
                 "/usr/bin/cage",
                 unique_runtime_dir(),
             )
@@ -1305,25 +1440,122 @@ mod tests {
     }
 
     #[test]
-    fn virtual_input_commands_still_report_not_implemented() {
-        let server = make_server(make_state());
-        let commands = [
+    fn input_commands_route_to_the_cage_seat() {
+        let mock = make_state();
+        let server = make_server(mock.clone());
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+
+        let handled = server.handle(&make_request(
+            1,
+            Command::Click {
+                x: 320,
+                y: 240,
+                button: MouseButton::Left,
+            },
+        ));
+        assert!(!handled.response.ok, "no session yet");
+        let _ = server.handle(&make_request(
+            2,
+            Command::CreateWorkspace { app: None },
+        ));
+        let handled = server.handle(&make_request(
+            3,
             Command::Click {
                 x: 1,
                 y: 2,
                 button: MouseButton::Left,
             },
-            Command::MovePointer { x: 1, y: 2 },
-            Command::TypeText { text: "hi".into() },
-            Command::PressKeys {
-                keys: vec!["ctrl".into()],
+        ));
+        assert!(!handled.response.ok, "no cage in this session");
+
+        let _ = server.handle(&make_request(4, Command::Teardown {}));
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+        let _ = server.handle(&make_request(
+            5,
+            Command::CreateWorkspace {
+                app: Some("foot".into()),
             },
-        ];
-        for cmd in commands {
-            let handled = server.handle(&make_request(7, cmd));
-            assert!(!handled.response.ok);
-            assert!(handled.response.error.unwrap().contains("not implemented"));
+        ));
+        for (id, cmd) in [
+            (
+                6,
+                Command::Click {
+                    x: 320,
+                    y: 240,
+                    button: MouseButton::Left,
+                },
+            ),
+            (7, Command::MovePointer { x: 10, y: 20 }),
+            (8, Command::TypeText { text: "hi".into() }),
+            (
+                9,
+                Command::PressKeys {
+                    keys: vec!["ctrl".into(), "s".into()],
+                },
+            ),
+        ] {
+            let handled = server.handle(&make_request(id, cmd));
+            assert!(handled.response.ok, "command {id}: {:?}", handled.response);
         }
+        let events = server.input.log.lock().unwrap().clone();
+        assert_eq!(
+            events,
+            vec![
+                "click 320 240 Left 1920 1080".to_string(),
+                "move 10 20 1920 1080".to_string(),
+                "type hi".to_string(),
+                "keys ctrl+s".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn input_connection_is_created_once_and_reused() {
+        let mock = make_state();
+        let server = make_server(mock.clone());
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+        let _ = server.handle(&make_request(
+            1,
+            Command::CreateWorkspace {
+                app: Some("foot".into()),
+            },
+        ));
+        for id in 2..5 {
+            let handled = server.handle(&make_request(
+                id,
+                Command::MovePointer { x: id as i32, y: 0 },
+            ));
+            assert!(handled.response.ok);
+        }
+        assert_eq!(server.input.connections.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn input_connect_failure_reports_an_error_response() {
+        let mock = make_state();
+        let mut server = make_server(mock.clone());
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+        let _ = server.handle(&make_request(
+            1,
+            Command::CreateWorkspace {
+                app: Some("foot".into()),
+            },
+        ));
+        server.input.fail = true;
+        let handled = server.handle(&make_request(
+            2,
+            Command::Click {
+                x: 1,
+                y: 1,
+                button: MouseButton::Left,
+            },
+        ));
+        assert!(!handled.response.ok);
+        assert!(handled
+            .response
+            .error
+            .unwrap()
+            .contains("connection refused"));
     }
 
     #[test]
