@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use std::process::exit;
 use std::thread;
 
-use staka_compositor::hyprctl::HyprCtl;
 use staka_compositor::server::{serve_connection, ServerState};
 
 fn default_socket_path() -> PathBuf {
@@ -56,7 +55,7 @@ fn main() {
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                let state = ServerState::new(HyprCtl::system());
+                let state = ServerState::system();
                 thread::spawn(move || {
                     if let Err(e) = serve_connection(&mut stream, &state) {
                         eprintln!("connection error: {}", e);
