@@ -1,97 +1,11 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import {
   KbEngineClient,
   KbEngineError,
   KbUnavailableError,
   orgSpace,
 } from "../src/lib/kb.ts";
-
-type StoredDoc = {
-  customId: string;
-  space: string;
-  content: string;
-  metadata: Record<string, string | number | boolean>;
-};
-
-function startFakeEngine() {
-  const docs = new Map<string, StoredDoc>();
-  const calls: Array<{ method: string; path: string; body: unknown }> = [];
-  let failWith: number | null = null;
-
-  const server = Bun.serve({
-    port: 0,
-    fetch: async (req) => {
-      const url = new URL(req.url);
-      const path = url.pathname;
-      if (failWith !== null) {
-        return Response.json({ error: "injected" }, { status: failWith });
-      }
-      const body = req.method === "GET" || req.method === "DELETE"
-        ? undefined
-        : await req.json().catch(() => undefined);
-      calls.push({ method: req.method, path, body });
-
-      if (req.method === "POST" && path === "/v3/documents") {
-        const b = body as { content: string; customId: string; containerTag: string; metadata?: Record<string, string> };
-        docs.set(b.customId, {
-          customId: b.customId,
-          space: b.containerTag,
-          content: b.content,
-          metadata: b.metadata ?? {},
-        });
-        return Response.json({ id: `eng_${b.customId}`, status: "queued" });
-      }
-
-      if (req.method === "POST" && path === "/v4/search") {
-        const b = body as {
-          q: string;
-          containerTag: string;
-          limit?: number;
-        };
-        const results = [...docs.values()]
-          .filter((d) => d.space === b.containerTag)
-          .filter((d) => d.content.toLowerCase().includes(b.q.toLowerCase().slice(0, 12)))
-          .slice(0, b.limit ?? 10)
-          .map((d, i) => ({
-            id: `chunk_${i}`,
-            chunk: d.content,
-            similarity: 0.9 - i * 0.1,
-            metadata: d.metadata,
-            documents: [{ id: d.customId, title: d.content.split("\n")[0], metadata: d.metadata }],
-          }));
-        return Response.json({ results, timing: 5, total: results.length });
-      }
-
-      const docMatch = path.match(/^\/v3\/documents\/([^/]+)$/);
-      if (req.method === "GET" && docMatch) {
-        const doc = docs.get(decodeURIComponent(docMatch[1]!));
-        if (!doc) return Response.json({ error: "not found" }, { status: 404 });
-        return Response.json({
-          customId: doc.customId,
-          content: doc.content,
-          title: doc.content.split("\n")[0],
-          status: "done",
-          metadata: doc.metadata,
-        });
-      }
-      if (req.method === "DELETE" && docMatch) {
-        const id = decodeURIComponent(docMatch[1]!);
-        return Response.json({ deleted: docs.delete(id) ? 1 : 0 });
-      }
-      return Response.json({ error: "not_found" }, { status: 404 });
-    },
-  });
-
-  return {
-    url: `http://localhost:${server.port}`,
-    docs,
-    calls,
-    setFailure: (status: number | null) => {
-      failWith = status;
-    },
-    stop: () => server.stop(true),
-  };
-}
+import { startFakeEngine } from "./helpers/fake-engine.ts";
 
 describe("KbEngineClient", () => {
   const engine = startFakeEngine();
@@ -106,7 +20,7 @@ describe("KbEngineClient", () => {
       space: "org_alpha",
       metadata: { org_id: "alpha", source: "upload" },
     });
-    expect(r.engineId).toBe("eng_doc:handbook");
+    expect(r.engineId).toBe("eng-doc:handbook");
     expect(engine.docs.get("doc:handbook")?.space).toBe("org_alpha");
   });
 

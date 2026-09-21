@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import {
   bigint,
   bigserial,
+  boolean,
   index,
   integer,
   jsonb,
@@ -163,6 +164,30 @@ export const adminAuditLog = pgTable("admin_audit_log", {
   prevHash: text("prev_hash").notNull(),
   createdAt: ts("created_at").notNull().defaultNow(),
 });
+
+export const kbDocuments = pgTable(
+  "kb_documents",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    customId: text("custom_id").notNull(),
+    title: text("title").notNull(),
+    source: text("source").notNull(),
+    docType: text("doc_type").notNull(),
+    sensitive: boolean("sensitive").notNull().default(false),
+    sizeBytes: integer("size_bytes").notNull(),
+    uploadedBy: uuid("uploaded_by").references(() => users.id),
+    engineId: text("engine_id"),
+    createdAt: ts("created_at").notNull().defaultNow(),
+    deletedAt: ts("deleted_at"),
+  },
+  (t) => [
+    uniqueIndex("kb_documents_custom_id_uidx").on(t.customId),
+    index("kb_documents_source_idx").on(t.source),
+    index("kb_documents_deleted_at_idx").on(t.deletedAt),
+  ],
+);
 
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;

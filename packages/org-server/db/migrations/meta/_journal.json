@@ -29,6 +29,13 @@
       "when": 1790031258292,
       "tag": "0003_kb_event_types",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1790031709250,
+      "tag": "0004_kb_documents",
+      "breakpoints": true
     }
   ]
 }

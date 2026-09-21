@@ -8,97 +8,24 @@ import {
   hashEnrollmentCode,
   maskEnrollmentCode,
 } from "../src/lib/codes.ts";
+import { KbEngineClient, type KbConfig } from "../src/lib/kb.ts";
 import { signJwt } from "../src/lib/jwt.ts";
 import { createTestApp } from "./helpers/app.ts";
+import { startFakeEngine } from "./helpers/fake-engine.ts";
 import { setupTestPools } from "./helpers/db.ts";
-
-/**
- * Fake retrieval engine standing in for supermemory-server. Space-scoped:
- * a search only ever sees documents stored under the requested
- * containerTag, and the tag is read from the recorded request body (never
- * trusted from anywhere else).
- */
-function startFakeEngine() {
-  const docs = new Map<
-    string,
-    { space: string; content: string; metadata: Record<string, unknown> }
-  >();
-  const searches: Array<{ q: string; containerTag: string }> = [];
-
-  const server = Bun.serve({
-    port: 0,
-    fetch: async (req) => {
-      const url = new URL(req.url);
-      const body =
-        req.method === "POST" ? await req.json().catch(() => undefined) : undefined;
-
-      if (req.method === "POST" && url.pathname === "/v3/documents") {
-        const b = body as {
-          content: string;
-          customId: string;
-          containerTag: string;
-          metadata?: Record<string, unknown>;
-        };
-        docs.set(b.customId, {
-          space: b.containerTag,
-          content: b.content,
-          metadata: b.metadata ?? {},
-        });
-        return Response.json({ id: `eng-${b.customId}`, status: "queued" });
-      }
-
-      if (req.method === "POST" && url.pathname === "/v4/search") {
-        const b = body as { q: string; containerTag: string; limit?: number };
-        searches.push({ q: b.q, containerTag: b.containerTag });
-        const results = [...docs.entries()]
-          .filter(([, d]) => d.space === b.containerTag)
-          .filter(([, d]) =>
-            d.content.toLowerCase().includes(b.q.toLowerCase().slice(0, 10)),
-          )
-          .slice(0, b.limit ?? 10)
-          .map(([customId, d], i) => ({
-            id: `chunk-${i}`,
-            chunk: d.content,
-            similarity: 0.9 - i * 0.1,
-            metadata: d.metadata,
-            documents: [
-              { id: customId, title: d.content.split("\n")[0], metadata: d.metadata },
-            ],
-          }));
-        return Response.json({ results, timing: 4, total: results.length });
-      }
-
-      const docMatch = url.pathname.match(/^\/v3\/documents\/([^/]+)$/);
-      if (req.method === "GET" && docMatch) {
-        const doc = docs.get(decodeURIComponent(docMatch[1]!));
-        if (!doc) return Response.json({ error: "not found" }, { status: 404 });
-        return Response.json({
-          customId: decodeURIComponent(docMatch[1]!),
-          content: doc.content,
-          title: doc.content.split("\n")[0],
-          status: "done",
-          metadata: doc.metadata,
-        });
-      }
-      return Response.json({ error: "not_found" }, { status: 404 });
-    },
-  });
-
-  return {
-    url: `http://localhost:${server.port}`,
-    docs,
-    searches,
-    stop: () => server.stop(true),
-  };
-}
 
 let pools: DbPools;
 let engine: ReturnType<typeof startFakeEngine>;
+let kbConfig: KbConfig;
 
 beforeAll(async () => {
   const setup = await setupTestPools();
   pools = setup.pools;
   engine = startFakeEngine();
+  kbConfig = {
+    client: new KbEngineClient({ baseUrl: engine.url }),
+    space: "org_alpha",
+  };
 });
 
 afterAll(async () => {
@@ -155,15 +82,7 @@ async function seedMachineWithJwt() {
       provisionFlow: "admin",
     })
     .returning();
-  const { app, keyring } = await createTestApp({
-    pools,
-    kb: {
-      client: new (await import("../src/lib/kb.ts")).KbEngineClient({
-        baseUrl: engine.url,
-      }),
-      space: "org_alpha",
-    },
-  });
+  const { app, keyring } = await createTestApp({ pools, kb: kbConfig });
   const { token } = await signJwt(keyring, {
     sub: machine!.id,
     typ: "machine",

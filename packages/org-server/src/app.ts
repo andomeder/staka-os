@@ -118,6 +118,7 @@ export function createApp(deps: AppDeps = {}) {
       if (deps.secureCookies !== undefined) {
         dashDeps.secureCookies = deps.secureCookies;
       }
+      if (deps.kb) dashDeps.kb = deps.kb;
       app.route("/", dashboardRoutes(dashDeps));
     }
   }

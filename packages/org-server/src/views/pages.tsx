@@ -552,3 +552,113 @@ export function StaleMachinesPage(props: {
     </Layout>
   );
 }
+
+export function KbPage(props: {
+  employeeId: string;
+  csrf: string;
+  stats: {
+    documents: number;
+    sensitive: number;
+    totalBytes: number;
+    bySource: Record<string, number>;
+  };
+  documents: Array<{
+    customId: string;
+    title: string;
+    source: string;
+    docType: string;
+    sensitive: boolean;
+    sizeBytes: number;
+    createdAt: string;
+  }>;
+  flash?: string;
+}) {
+  return (
+    <Layout
+      title="Knowledge base"
+      employeeId={props.employeeId}
+      csrf={props.csrf}
+    >
+      <div class="card">
+        <div class="row" style="justify-content:space-between;">
+          <h1>Knowledge base</h1>
+          <form method="post" action="/admin/kb/profiles/sync">
+            <Csrf token={props.csrf} />
+            <button class="btn" type="submit">
+              Sync directory profiles
+            </button>
+          </form>
+        </div>
+        {props.flash ? <div class="flash">{props.flash}</div> : null}
+        <p class="muted">
+          {props.stats.documents} documents ·{" "}
+          {props.stats.sensitive} sensitive ·{" "}
+          {(props.stats.totalBytes / 1024).toFixed(1)} KiB
+        </p>
+        <table>
+          <thead>
+            <tr>
+              <th>Title</th>
+              <th>Source</th>
+              <th>Type</th>
+              <th>Size</th>
+              <th>Uploaded</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.documents.length === 0 ? (
+              <tr>
+                <td colspan="6" class="muted">
+                  No documents yet. Upload org docs so agents can search
+                  them.
+                </td>
+              </tr>
+            ) : (
+              props.documents.map((d) => (
+                <tr>
+                  <td>{d.title}</td>
+                  <td>{d.source}</td>
+                  <td>{d.docType}</td>
+                  <td class="mono">{(d.sizeBytes / 1024).toFixed(1)} KiB</td>
+                  <td class="muted">{d.createdAt}</td>
+                  <td>
+                    <form
+                      method="post"
+                      action={`/admin/kb/documents/${encodeURIComponent(d.customId)}/delete`}
+                      style="display:inline;"
+                    >
+                      <Csrf token={props.csrf} />
+                      <button class="btn" type="submit">
+                        Delete
+                      </button>
+                    </form>
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>Upload document</h2>
+        <form class="stack" method="post" action="/admin/kb/documents" enctype="multipart/form-data">
+          <Csrf token={props.csrf} />
+          <label>
+            File (markdown, text, or PDF, max 10 MiB)
+            <input type="file" name="file" accept=".md,.txt,.pdf" />
+          </label>
+          <label>
+            Title (defaults to the file name)
+            <input name="title" placeholder="Q3 reporting procedure" />
+          </label>
+          <label class="checkbox">
+            <input type="checkbox" name="sensitive" value="1" />
+            Sensitive: exclude from agent retrieval (admin preview only)
+          </label>
+          <button type="submit">Upload</button>
+        </form>
+      </div>
+    </Layout>
+  );
+}
