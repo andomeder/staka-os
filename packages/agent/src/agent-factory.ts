@@ -9,6 +9,8 @@ import { createSkillManageTool } from "./tools/skill-manage.ts";
 import { createMemoryTool } from "./tools/memory.ts";
 import { createSessionSearchTool } from "./tools/session-search.ts";
 import { createCompositorTools } from "./tools/compositor.ts";
+import { createBrowserTools } from "./tools/browser.ts";
+import { createAtspiTools } from "./tools/atspi.ts";
 import { buildMemoryPromptBlock } from "./memory/personal.ts";
 import { buildSkillsIndex, type SourcedSkill } from "./skills/loader.ts";
 
@@ -63,6 +65,9 @@ function buildSystemPrompt(orgName?: string | null, skills?: SourcedSkill[]): st
     "Use the org tools to answer questions about the current machine and the org directory.",
     "Prefer org_whoami for identity questions and org_users_search to find colleagues.",
     "Use org_log_event to record notable agent actions.",
+    "Structured access ladder: prefer org tools (native API), then browser_* over CDP and atspi_read for structured app access.",
+    "The user's display and input are never taken over: browser tools talk to the page, not the seat; headless work happens via compositor_* tools.",
+    "If a tool reports a target as unreachable, say so plainly to the user; never invent results and never fall back to screenshots silently.",
   ];
 
   const memoryBlock = buildMemoryPromptBlock();
@@ -95,6 +100,11 @@ export function createAgent(deps: CreateAgentDeps): Agent {
   const memoryTool = createMemoryTool();
   const sessionSearchTool = createSessionSearchTool();
   const compositorTools = createCompositorTools();
+  const browserTools = createBrowserTools({
+    profileDir: deps.env.STAKA_BROWSER_PROFILE_DIR,
+    chromiumBin: deps.env.STAKA_CHROMIUM_BIN,
+  });
+  const atspiTools = createAtspiTools();
   const tools = [
     ...orgTools,
     ...skillsTools,
@@ -102,6 +112,8 @@ export function createAgent(deps: CreateAgentDeps): Agent {
     memoryTool,
     sessionSearchTool,
     ...compositorTools,
+    ...browserTools,
+    ...atspiTools,
   ];
   return new Agent({
     initialState: {
