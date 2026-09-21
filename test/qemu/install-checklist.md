@@ -118,6 +118,19 @@ After first boot of the installed system, log in to the desktop.
 If the agent binary was not staged in the ISO (`/opt/staka/agent/staka-agent`
 missing), these checks are skipped and the gap is noted in the record.
 
+## 8. AI walkthrough (browser + delivery)
+
+After section 7 passes, verify the full agent walkthrough on the installed
+system. Script and fixtures: `test/demo/walkthrough.md`, `test/demo/`.
+
+- [ ] `browser_open` on `test/demo/demo-dashboard.html` (served or `file://`) opens the Staka-managed Chromium with a dedicated profile under `$XDG_DATA_HOME/staka/browser`
+- [ ] Selecting the headline figure and asking via the panel captures it (`browser_get_selection`), no screenshot reading involved
+- [ ] `compositor_start_app { app: "spreadsheet" }` opens Calc on the headless output; the user's display is untouched; `compositor_type` enters the figure
+- [ ] `fs_read_file` reads the demo report only from a `STAKA_FS_ALLOWLIST` dir; a path outside the allowlist returns `path_denied` and is audited in the org usage log
+- [ ] `org_users_search` resolves the colleague; `org_deliver` records the delivery and the admin dashboard shows it under Deliveries
+- [ ] `memory` saved; reopening the panel shows the interaction in context
+- [ ] Failure drills (browser closed, no selection, disallowed path, compositor down) each produce an honest report in the panel, per `test/demo/walkthrough.md`
+- [ ] Rehearsal recorded; note the run in the walkthrough Record table
 
 ## Record
 

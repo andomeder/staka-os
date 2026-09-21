@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Acme Q3 Dashboard</title>
+<style>
+  body { font-family: system-ui, sans-serif; margin: 2rem; background: #10141c; color: #e8ecf4; }
+  h1 { font-size: 1.4rem; }
+  .card { background: #1a2130; border-radius: 8px; padding: 1rem 1.5rem; margin-bottom: 1rem; }
+  .metric { font-size: 2rem; font-weight: 600; }
+  table { border-collapse: collapse; width: 100%; }
+  th, td { text-align: left; padding: 0.5rem 0.75rem; border-bottom: 1px solid #2a3348; }
+  form { margin-top: 1rem; }
+  input, button { font-size: 1rem; padding: 0.4rem 0.7rem; }
+</style>
+</head>
+<body>
+  <h1>Acme - Q3 Regional Dashboard</h1>
+
+  <div class="card">
+    <p>Select the headline figure below, then ask the Staka agent to move it.</p>
+    <p class="metric">Q3 revenue: <span id="q3-revenue">4.82M KES</span></p>
+  </div>
+
+  <div class="card">
+    <table>
+      <thead>
+        <tr><th>Region</th><th>Revenue</th><th>Growth</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Nairobi</td><td>2.10M KES</td><td>14%</td></tr>
+        <tr><td>Mombasa</td><td>1.32M KES</td><td>9%</td></tr>
+        <tr><td>Kisumu</td><td>0.88M KES</td><td>15%</td></tr>
+        <tr><td>Nakuru</td><td>0.52M KES</td><td>6%</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <form onsubmit="event.preventDefault(); document.getElementById('echo').textContent = 'Updated ' + document.getElementById('amount').value;">
+      <label for="amount">Adjust headline (agent fills this):</label>
+      <input id="amount" name="amount" />
+      <button id="apply" type="submit">Apply</button>
+    </form>
+    <p id="echo" class="muted"></p>
+  </div>
+</body>
+</html>
