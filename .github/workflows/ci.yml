@@ -64,3 +64,33 @@ jobs:
 
       - name: Docker build
         run: docker build -f packages/org-server/Dockerfile -t staka-org-server:ci .
+
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Cache cargo registry and build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/index
+            crates/target
+          key: cargo-${{ runner.os }}-${{ hashFiles('crates/Cargo.lock') }}
+          restore-keys: cargo-${{ runner.os }}-
+
+      - name: Build
+        working-directory: crates
+        run: cargo build --locked
+
+      - name: Test
+        working-directory: crates
+        run: cargo test --locked

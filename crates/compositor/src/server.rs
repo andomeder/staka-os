@@ -1,40 +1,79 @@
 //! Unix socket server: accepts agent connections, decodes request frames,
 //! dispatches commands, and encodes response frames.
 //!
-//! Screenshot and virtual input require the nested-compositor lifecycle and
-//! are dispatched as explicit "not implemented" errors until those land.
-//! Headless workspace create/teardown is real: it talks to hyprctl.
+//! One driver process owns at most one agent workspace at a time:
+//! `create_workspace` captures the user's layout, creates a headless
+//! output, launches the nested cage compositor with the requested app, and
+//! pins a dedicated named agent workspace to the invisible output.
+//! `screenshot` captures that output. `teardown` reverses everything and
+//! restores the user's layout. Virtual input (click/type/key) still needs
+//! the Wayland input client and is dispatched as an explicit "not
+//! implemented" error.
 
 use std::io::{self, Write};
 use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
-use crate::hyprctl::{CommandRunner, HyprCtl};
+use crate::cage::{split_app, CageConfig, CageSession, ChildProcess, ProcessSpawner, SystemSpawner};
+use crate::hyprctl::{Client, CommandRunner, HyprCtl, HyprError};
 use crate::ipc::{
-    encode_response, parse_request, read_frame, Command, Frame, Request, Response,
+    encode_response, parse_request, read_frame, Command, Frame, Request, Response, ImageFormat,
     FRAME_TYPE_JSON,
 };
+use crate::screencopy::{capture_png, CaptureRunner, GrimCapture};
+use crate::workspace::{LayoutSnapshot, WorkspaceManager};
 
-pub struct ServerState<C: CommandRunner> {
+/// Name of the Wayland socket the nested cage compositor creates.
+const CAGE_SOCKET_NAME: &str = "staka-cage";
+
+/// How long to wait for the cage window to appear in `hyprctl clients -j`.
+const WINDOW_APPEAR_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Everything one agent workspace owns; torn down by `Teardown`.
+pub struct ActiveSession {
+    pub output: String,
+    pub workspace: String,
+    pub layout: LayoutSnapshot,
+    pub cage: Option<CageSession>,
+    /// Apps launched into the cage; killed on teardown. Cage's own death
+    /// takes the apps with it, but explicit kills keep teardown
+    /// deterministic.
+    pub apps: Vec<Box<dyn ChildProcess>>,
+}
+
+pub struct ServerState<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner> {
     hyprctl: HyprCtl<C>,
-    /// Headless outputs created by this driver process, removed on teardown.
-    created_outputs: Mutex<Vec<String>>,
+    spawner: S,
+    capture: G,
+    cage_binary: PathBuf,
+    /// Runtime dir where the cage Wayland socket appears.
+    runtime_dir: PathBuf,
+    session: Mutex<Option<ActiveSession>>,
 }
 
-/// One command's outcome: the JSON response plus an optional binary frame
-/// (currently unused; screenshots will send PNG bytes here).
-pub struct Handled {
-    pub response: Response,
-    pub binary: Option<Vec<u8>>,
-}
-
-impl<C: CommandRunner> ServerState<C> {
-    pub fn new(hyprctl: HyprCtl<C>) -> Self {
+impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner> ServerState<C, S, G> {
+    pub fn new(
+        hyprctl: HyprCtl<C>,
+        spawner: S,
+        capture: G,
+        cage_binary: impl Into<PathBuf>,
+        runtime_dir: impl Into<PathBuf>,
+    ) -> Self {
         ServerState {
             hyprctl,
-            created_outputs: Mutex::new(Vec::new()),
+            spawner,
+            capture,
+            cage_binary: cage_binary.into(),
+            runtime_dir: runtime_dir.into(),
+            session: Mutex::new(None),
         }
     }
+
+    /// Snapshot of the user's layout before the driver touches anything.
+    /// Kept separate from the generic impl so the concrete `system()`
+    /// constructor lives beside the concrete types it uses.
 
     pub fn handle(&self, request: &Request) -> Handled {
         let id = request.id;
@@ -49,76 +88,310 @@ impl<C: CommandRunner> ServerState<C> {
                     binary: None,
                 },
             },
-            Command::CreateWorkspace { app } => {
-                if app.is_some() {
-                    return Handled {
-                        response: Response::err(
-                            id,
-                            "launching an app requires the nested compositor, not available yet",
-                        ),
-                        binary: None,
-                    };
-                }
-                match self.hyprctl.create_headless_output() {
-                    Ok(name) => {
-                        self.created_outputs.lock().unwrap().push(name.clone());
-                        Handled {
-                            response: Response::ok_with(id, serde_json::json!({ "output": name })),
-                            binary: None,
-                        }
-                    }
-                    Err(e) => Handled {
-                        response: Response::err(id, e.to_string()),
-                        binary: None,
-                    },
-                }
-            }
-            Command::Teardown {} => {
-                let mut created = self.created_outputs.lock().unwrap();
-                let mut removed = Vec::new();
-                let mut first_error = None;
-                let names: Vec<String> = created.drain(..).collect();
-                for name in names {
-                    match self.hyprctl.remove_output(&name) {
-                        Ok(()) => removed.push(name),
-                        Err(e) => {
-                            if first_error.is_none() {
-                                first_error =
-                                    Some(format!("failed to remove {}: {}", name, e));
-                            }
-                            // Keep the name so a later teardown can retry.
-                            created.push(name);
-                        }
-                    }
-                }
-                drop(created);
-                match first_error {
-                    Some(error) => Handled {
-                        response: Response::err(id, error),
-                        binary: None,
-                    },
-                    None => Handled {
-                        response: Response::ok_with(id, serde_json::json!({ "removed": removed })),
-                        binary: None,
-                    },
-                }
-            }
-            Command::RunApp { .. } => not_implemented(id, "run_app"),
-            Command::Screenshot { .. } => not_implemented(id, "screenshot"),
+            Command::CreateWorkspace { app } => self.handle_create_workspace(id, app.as_deref()),
+            Command::RunApp { app } => self.handle_run_app(id, app),
+            Command::Screenshot { format } => self.handle_screenshot(id, *format),
+            Command::Teardown {} => self.handle_teardown(id),
             Command::Click { .. } => not_implemented(id, "click"),
             Command::MovePointer { .. } => not_implemented(id, "move_pointer"),
             Command::TypeText { .. } => not_implemented(id, "type"),
             Command::PressKeys { .. } => not_implemented(id, "key"),
         }
     }
+
+    fn handle_create_workspace(&self, id: u64, app: Option<&str>) -> Handled {
+        let mut session_guard = self.session.lock().unwrap();
+        if session_guard.is_some() {
+            return Handled {
+                response: Response::err(
+                    id,
+                    "a workspace is already active; tear it down before creating another",
+                ),
+                binary: None,
+            };
+        }
+
+        let manager = WorkspaceManager::new(&self.hyprctl);
+
+        // Snapshot first: teardown compares against exactly this state.
+        let layout = match LayoutSnapshot::capture(&self.hyprctl) {
+            Ok(layout) => layout,
+            Err(e) => return error(id, e),
+        };
+
+        let output = match self.hyprctl.create_headless_output() {
+            Ok(output) => output,
+            Err(e) => return error(id, e),
+        };
+
+        // Creating the output makes Hyprland grab a workspace for it
+        // immediately - sometimes a fresh empty one, sometimes one of the
+        // user's. Adopt a fresh grab as the agent workspace; otherwise the
+        // agent workspace is created by moving the cage window and pinned
+        // below. Either way the output ends up hosting the agent
+        // workspace, which is the only stable state: an output left
+        // without a workspace gets another one grabbed for it
+        // immediately.
+        let adopted = match manager.adopt_grabbed_workspace(&layout, &output) {
+            Ok(adopted) => adopted,
+            Err(e) => return self.fail_create(id, &output, layout, e),
+        };
+        let was_adopted = adopted.is_some();
+        let workspace = match adopted {
+            Some(name) => name,
+            None => match manager.select() {
+                Ok(name) => name,
+                Err(e) => return self.fail_create(id, &output, layout, e),
+            },
+        };
+
+        // Launch cage with the app inside, then move its window silently
+        // onto the dedicated agent workspace on the invisible output. The
+        // user's focused workspace never changes.
+        let cage = match app {
+            Some(app) => match self.launch_cage(&manager, &workspace, &output, app, !was_adopted) {
+                Ok(cage) => Some(cage),
+                Err(e) => return self.fail_create(id, &output, layout, e),
+            },
+            None => None,
+        };
+
+        // With the agent workspace occupying the output, give back any
+        // user workspace Hyprland grabbed, and verify the layout is
+        // stable.
+        if let Err(e) = manager.settle(&layout, &output, 5) {
+            return self.fail_create(id, &output, layout, e);
+        }
+
+        *session_guard = Some(ActiveSession {
+            output: output.clone(),
+            workspace: workspace.clone(),
+            layout,
+            cage,
+            apps: Vec::new(),
+        });
+
+        let mut data = serde_json::json!({ "output": output, "workspace": workspace });
+        if let Some(cage) = session_guard.as_ref().and_then(|s| s.cage.as_ref()) {
+            data["cage_pid"] = serde_json::json!(cage.pid);
+            data["socket"] = serde_json::json!(CAGE_SOCKET_NAME);
+        }
+        Handled {
+            response: Response::ok_with(id, data),
+            binary: None,
+        }
+    }
+
+    /// Fails a create_workspace and undoes everything done so far, so a
+    /// half-created workspace never lingers.
+    fn fail_create(&self, id: u64, output: &str, layout: LayoutSnapshot, e: HyprError) -> Handled {
+        if let Err(remove_err) = self.hyprctl.remove_output(output) {
+            eprintln!(
+                "warning: failed to remove {} during cleanup: {}",
+                output, remove_err
+            );
+        }
+        let manager = WorkspaceManager::new(&self.hyprctl);
+        if let Err(restore_err) = manager.restore(&layout) {
+            eprintln!("warning: layout restore during cleanup failed: {}", restore_err);
+        }
+        error(id, e)
+    }
+
+    fn launch_cage(
+        &self,
+        manager: &WorkspaceManager<C>,
+        workspace: &str,
+        output: &str,
+        app: &str,
+        needs_pin: bool,
+    ) -> Result<CageSession, HyprError> {
+        let wayland_display = std::env::var("WAYLAND_DISPLAY").map_err(|_| {
+            HyprError::Parse(
+                "WAYLAND_DISPLAY is not set; cannot launch the nested compositor".to_string(),
+            )
+        })?;
+        let config = CageConfig {
+            cage_binary: self.cage_binary.clone(),
+            socket_name: CAGE_SOCKET_NAME.to_string(),
+            socket_dir: self.runtime_dir.clone(),
+            wayland_display,
+            app: app.to_string(),
+            ..Default::default()
+        };
+        let session =
+            CageSession::spawn(&self.spawner, &config).map_err(|e| HyprError::Parse(e.to_string()))?;
+
+        // Wait for Hyprland to see the cage window, then move it silently
+        // onto the dedicated agent workspace. The user's focused workspace
+        // never changes.
+        let client = wait_for_client(&self.hyprctl, session.pid).map_err(HyprError::Parse)?;
+        manager
+            .move_window(workspace, &client.address)
+            .map_err(|e| HyprError::Parse(format!("cage window move failed: {}", e)))?;
+        if needs_pin {
+            // The agent workspace was created by the move on the user's
+            // monitor; force it onto the invisible output.
+            manager
+                .pin_to_output(workspace, output)
+                .map_err(|e| HyprError::Parse(format!("workspace pin failed: {}", e)))?;
+        }
+        Ok(session)
+    }
+
+    fn handle_run_app(&self, id: u64, app: &str) -> Handled {
+        let mut session_guard = self.session.lock().unwrap();
+        let Some(session) = session_guard.as_mut() else {
+            return error(id, "no active workspace; create one first");
+        };
+        let Some(cage) = session.cage.as_ref() else {
+            return error(id, "the nested compositor is not running in this workspace");
+        };
+        let mut words = split_app(app);
+        if words.is_empty() {
+            return error(id, "run_app requires an app command");
+        }
+        let program = words.remove(0);
+        match self.spawner.spawn(
+            std::path::Path::new(&program),
+            &words,
+            &[("WAYLAND_DISPLAY", cage.socket_name.clone())],
+        ) {
+            Ok(child) => {
+                let pid = child.pid();
+                session.apps.push(child);
+                Handled {
+                    response: Response::ok_with(id, serde_json::json!({ "pid": pid })),
+                    binary: None,
+                }
+            }
+            Err(e) => error(id, format!("failed to launch app: {}", e)),
+        }
+    }
+
+    fn handle_screenshot(&self, id: u64, format: ImageFormat) -> Handled {
+        if format != ImageFormat::Png {
+            return error(id, "only png capture is supported");
+        }
+        let session_guard = self.session.lock().unwrap();
+        let Some(session) = session_guard.as_ref() else {
+            return error(id, "no active workspace; create one first");
+        };
+        match capture_png(&self.capture, &session.output) {
+            Ok(png) => Handled {
+                response: Response::ok_with(id, serde_json::json!({ "binary": true })),
+                binary: Some(png),
+            },
+            Err(e) => error(id, e),
+        }
+    }
+
+    fn handle_teardown(&self, id: u64) -> Handled {
+        let mut session_guard = self.session.lock().unwrap();
+        let Some(mut session) = session_guard.take() else {
+            return Handled {
+                response: Response::ok_with(id, serde_json::json!({ "removed": [] })),
+                binary: None,
+            };
+        };
+
+        let mut failures: Vec<String> = Vec::new();
+
+        // Kill apps first: they are cage's clients, and teardown must be
+        // deterministic even if cage ignores its own shutdown.
+        while let Some(mut app) = session.apps.pop() {
+            let pid = app.pid();
+            if let Err(e) = app.signal(SIGTERM) {
+                failures.push(format!("failed to signal app pid {}: {}", pid, e));
+            }
+            if let Err(e) = app.wait() {
+                failures.push(format!("failed to reap app pid {}: {}", pid, e));
+            }
+        }
+
+        let cage_terminated = session.cage.is_some();
+        if let Some(cage) = session.cage.as_mut() {
+            if let Err(e) = cage.terminate() {
+                failures.push(e.to_string());
+            }
+        }
+
+        // Put every workspace that drifted onto a headless output back
+        // where the user had it, before the output itself disappears.
+        let manager = WorkspaceManager::new(&self.hyprctl);
+        let mut moved_back = Vec::new();
+        match manager.restore(&session.layout) {
+            Ok(report) => moved_back = report.moved_back,
+            Err(e) => failures.push(format!("layout restore failed: {}", e)),
+        }
+
+        match self.hyprctl.remove_output(&session.output) {
+            Ok(()) => {}
+            Err(e) => {
+                // Keep the session (minus the dead cage) so teardown can
+                // be retried after a transient hyprctl failure.
+                failures.push(format!("failed to remove {}: {}", session.output, e));
+                session.cage = None;
+                *session_guard = Some(session);
+                return error(id, failures.join("; "));
+            }
+        }
+
+        if failures.is_empty() {
+            Handled {
+                response: Response::ok_with(
+                    id,
+                    serde_json::json!({
+                        "removed": [session.output],
+                        "moved_back": moved_back,
+                        "cage_terminated": cage_terminated,
+                    }),
+                ),
+                binary: None,
+            }
+        } else {
+            error(id, failures.join("; "))
+        }
+    }
 }
+
+impl ServerState<crate::hyprctl::SystemRunner, SystemSpawner, GrimCapture> {
+    /// The real driver state: hyprctl on PATH, grim for capture, cage on
+    /// PATH, sockets in the session runtime dir.
+    pub fn system() -> Self {
+        let runtime_dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".to_string());
+        ServerState::new(
+            HyprCtl::system(),
+            SystemSpawner,
+            GrimCapture::default(),
+            "cage",
+            runtime_dir,
+        )
+    }
+}
+
+/// One command's outcome: the JSON response plus an optional binary frame
+/// (screenshots send PNG bytes here).
+pub struct Handled {
+    pub response: Response,
+    pub binary: Option<Vec<u8>>,
+}
+
+fn error(id: u64, e: impl std::fmt::Display) -> Handled {
+    Handled {
+        response: Response::err(id, e.to_string()),
+        binary: None,
+    }
+}
+
+const SIGTERM: i32 = 15;
 
 fn not_implemented(id: u64, cmd: &str) -> Handled {
     Handled {
         response: Response::err(
             id,
             format!(
-                "{} is not implemented yet; headless workspace lifecycle only",
+                "{} is not implemented yet; virtual input lands with the Wayland input client",
                 cmd
             ),
         ),
@@ -126,12 +399,48 @@ fn not_implemented(id: u64, cmd: &str) -> Handled {
     }
 }
 
+/// Polls `hyprctl clients -j` until a client whose pid matches appears.
+fn wait_for_client<C: CommandRunner>(
+    ctl: &HyprCtl<C>,
+    pid: u32,
+) -> Result<Client, String> {
+    let deadline = Instant::now() + WINDOW_APPEAR_TIMEOUT;
+    loop {
+        let clients = ctl.list_clients().map_err(|e| e.to_string())?;
+        if let Some(client) = clients.iter().find(|c| c.pid == pid) {
+            return Ok(client.clone());
+        }
+        if let Ok(Some(_)) = ctl_pid_exited(pid) {
+            return Err(format!("process {} exited before its window appeared", pid));
+        }
+        if Instant::now() >= deadline {
+            return Err(format!("window for pid {} did not appear in time", pid));
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+/// Checks whether a pid is still alive, via signal 0 (existence probe).
+fn ctl_pid_exited(pid: u32) -> io::Result<Option<()>> {
+    let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
+    if rc == 0 {
+        Ok(None)
+    } else {
+        let err = io::Error::last_os_error();
+        match err.raw_os_error() {
+            Some(libc::ESRCH) => Ok(Some(())),
+            Some(libc::EPERM) => Ok(None), // alive but not ours
+            _ => Err(err),
+        }
+    }
+}
+
 /// Serves one connection: request frame in, response frame out, until the
 /// peer closes. Malformed requests get an error response with id 0 (the id
 /// cannot be recovered from an unparsable payload).
-pub fn serve_connection<C: CommandRunner>(
+pub fn serve_connection<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner>(
     stream: &mut UnixStream,
-    state: &ServerState<C>,
+    state: &ServerState<C, S, G>,
 ) -> io::Result<()> {
     loop {
         let frame = match read_frame(stream)? {
@@ -168,11 +477,10 @@ pub fn serve_connection<C: CommandRunner>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::{parse_response, ImageFormat, MouseButton};
+    use crate::ipc::{parse_response, MouseButton};
     use std::os::unix::process::ExitStatusExt;
     use std::process::{ExitStatus, Output};
-
-    const BASE_MONITORS: &str = r#"[{"id": 0, "name": "DP-3"}]"#;
+    use std::sync::{Arc, Mutex};
 
     fn ok(stdout: &str) -> Output {
         Output {
@@ -190,56 +498,356 @@ mod tests {
         }
     }
 
-    /// In-memory Hyprland: tracks created headless outputs and reflects them
-    /// in the monitors list, mirroring real hyprctl behavior.
-    struct MockHyprland {
-        created: Mutex<Vec<String>>,
-        /// When set, `output remove` fails with this stdout text.
-        remove_fails: Option<String>,
+    fn client(address: &str, pid: u32, workspace: &str) -> Client {
+        Client {
+            address: address.to_string(),
+            class: "wlroots".to_string(),
+            title: "cage".to_string(),
+            pid,
+            workspace: Some(crate::hyprctl::ClientWorkspace {
+                name: workspace.to_string(),
+            }),
+        }
     }
 
-    impl MockHyprland {
-        fn new() -> Self {
-            MockHyprland {
-                created: Mutex::new(Vec::new()),
-                remove_fails: None,
+    /// Shared state between the hyprctl mock and the spawner mock, so a
+    /// spawned cage "process" can appear as a Hyprland client.
+    struct MockState {
+        monitors: Mutex<Vec<String>>,
+        workspaces: Mutex<Vec<crate::hyprctl::Workspace>>,
+        clients: Mutex<Vec<Client>>,
+        dispatches: Mutex<Vec<String>>,
+        spawned_processes: Mutex<Vec<SpawnedProcess>>,
+        /// When true, the output create grabs one of the user's workspaces
+        /// instead of a fresh empty one (both behaviors seen on 0.56).
+        grab_user: std::sync::atomic::AtomicBool,
+        remove_fails: std::sync::atomic::AtomicBool,
+    }
+
+    impl Default for MockState {
+        fn default() -> Self {
+            MockState {
+                monitors: Mutex::new(Vec::new()),
+                workspaces: Mutex::new(Vec::new()),
+                clients: Mutex::new(Vec::new()),
+                dispatches: Mutex::new(Vec::new()),
+                spawned_processes: Mutex::new(Vec::new()),
+                grab_user: std::sync::atomic::AtomicBool::new(false),
+                remove_fails: std::sync::atomic::AtomicBool::new(false),
             }
         }
+    }
 
-        fn next_name(&self) -> String {
-            let created = self.created.lock().unwrap();
-            format!("HEADLESS-{}", created.len() + 2)
-        }
+    struct SpawnedProcess {
+        program: String,
+        args: Vec<String>,
+        env: Vec<(String, String)>,
+        signals_seen: Arc<Mutex<Vec<i32>>>,
+    }
 
-        fn monitors_json(&self) -> String {
-            let created = self.created.lock().unwrap();
-            let mut entries = vec![r#"{"id": 0, "name": "DP-3"}"#.to_string()];
-            for (i, name) in created.iter().enumerate() {
-                entries.push(format!(r#"{{"id": {}, "name": "{}"}}"#, i + 1, name));
-            }
-            format!("[{}]", entries.join(","))
-        }
+    struct MockHyprland {
+        state: Arc<MockState>,
     }
 
     impl CommandRunner for MockHyprland {
         fn run(&self, args: &[&str]) -> io::Result<Output> {
+            let state = &self.state;
             match args {
-                ["monitors", "-j"] => Ok(ok(&self.monitors_json())),
+                ["monitors", "-j"] => {
+                    let monitors = state.monitors.lock().unwrap();
+                    let entries: Vec<String> = monitors
+                        .iter()
+                        .enumerate()
+                        .map(|(i, name)| format!(r#"{{"id": {}, "name": "{}"}}"#, i, name))
+                        .collect();
+                    Ok(ok(&format!("[{}]", entries.join(","))))
+                }
+                ["workspaces", "-j"] => {
+                    let workspaces = state.workspaces.lock().unwrap();
+                    let entries: Vec<String> = workspaces
+                        .iter()
+                        .map(|w| {
+                            format!(
+                                r#"{{"id": {}, "name": "{}", "monitor": "{}", "windows": {}}}"#,
+                                w.id, w.name, w.monitor, w.windows
+                            )
+                        })
+                        .collect();
+                    Ok(ok(&format!("[{}]", entries.join(","))))
+                }
+                ["clients", "-j"] => {
+                    let clients = state.clients.lock().unwrap();
+                    let entries: Vec<String> = clients
+                        .iter()
+                        .map(|c| {
+                            let ws = c
+                                .workspace
+                                .as_ref()
+                                .map(|w| format!(r#"{{"id": 0, "name": "{}"}}"#, w.name))
+                                .unwrap_or_else(|| "null".to_string());
+                            format!(
+                                r#"{{"address": "{}", "class": "{}", "title": "{}",
+                                    "pid": {}, "monitor": 0, "workspace": {}}}"#,
+                                c.address, c.class, c.title, c.pid, ws
+                            )
+                        })
+                        .collect();
+                    Ok(ok(&format!("[{}]", entries.join(","))))
+                }
                 ["output", "create", "headless"] => {
-                    let name = self.next_name();
-                    self.created.lock().unwrap().push(name);
+                    let mut monitors = state.monitors.lock().unwrap();
+                    let max = monitors
+                        .iter()
+                        .filter(|n| is_headless(n))
+                        .filter_map(|n| n.rsplit('-').next().and_then(|s| s.parse::<u32>().ok()))
+                        .max()
+                        .unwrap_or(1);
+                    let name = format!("HEADLESS-{}", max + 1);
+                    monitors.push(name.clone());
+                    drop(monitors);
+                    // Hyprland grabs a workspace for the new output
+                    // immediately: a fresh empty one, or one of the user's
+                    // (grab_user).
+                    let mut workspaces = state.workspaces.lock().unwrap();
+                    if state.grab_user.load(std::sync::atomic::Ordering::SeqCst) {
+                        if let Some(user_ws) = workspaces
+                            .iter_mut()
+                            .find(|w| w.name != "1" && w.name.parse::<u32>().is_ok())
+                        {
+                            user_ws.monitor = name;
+                        }
+                    } else {
+                        let next_id = workspaces.iter().map(|w| w.id).max().unwrap_or(0) + 1;
+                        workspaces.push(crate::hyprctl::Workspace {
+                            id: next_id,
+                            name: next_id.to_string(),
+                            monitor: name,
+                            windows: 0,
+                        });
+                    }
                     Ok(ok("ok"))
                 }
                 ["output", "remove", name] => {
-                    if let Some(text) = &self.remove_fails {
-                        return Ok(failed(text));
+                    if state.remove_fails.load(std::sync::atomic::Ordering::SeqCst) {
+                        return Ok(failed("error removing output"));
                     }
-                    self.created.lock().unwrap().retain(|n| n != name);
+                    state.monitors.lock().unwrap().retain(|n| n != name);
+                    // Workspaces on a removed output are destroyed.
+                    state
+                        .workspaces
+                        .lock()
+                        .unwrap()
+                        .retain(|w| w.monitor != *name);
+                    Ok(ok("ok"))
+                }
+                ["dispatch", rest @ ..] => {
+                    // dispatch args arrive as one joined string (legacy
+                    // form) or one lua expression; normalize to legacy
+                    // words for the in-memory behavior below.
+                    let joined = rest.join(" ");
+                    state.dispatches.lock().unwrap().push(joined.clone());
+                    let mut words = joined.split_whitespace();
+                    let dispatcher = words.next().unwrap_or("");
+                    let dispatch_args: Vec<&str> = words.collect();
+                    match (dispatcher, dispatch_args.as_slice()) {
+                        // movetoworkspacesilent <ws>,address:<addr>: move
+                        // the client and, like Hyprland, create the
+                        // workspace if it does not exist. Placement on the
+                        // physical monitor simulates Hyprland's default
+                        // pick; the driver is expected to pin afterwards.
+                        ("movetoworkspacesilent", [spec]) => {
+                            let (ws, addr) = spec.split_once(",address:").ok_or_else(|| {
+                                io::Error::other("bad movetoworkspacesilent spec")
+                            })?;
+                            let mut clients = state.clients.lock().unwrap();
+                            for c in clients.iter_mut() {
+                                if c.address == addr {
+                                    c.workspace = Some(crate::hyprctl::ClientWorkspace {
+                                        name: ws.to_string(),
+                                    });
+                                }
+                            }
+                            let mut workspaces = state.workspaces.lock().unwrap();
+                            if !workspaces.iter().any(|w| w.name == ws) {
+                                let next_id = workspaces
+                                    .iter()
+                                    .map(|w| w.id)
+                                    .max()
+                                    .unwrap_or(0)
+                                    + 1;
+                                workspaces.push(crate::hyprctl::Workspace {
+                                    id: next_id,
+                                    name: ws.to_string(),
+                                    monitor: "DP-3".to_string(),
+                                    windows: 0,
+                                });
+                            }
+                        }
+                        // moveworkspacetomonitor <ws> <monitor>.
+                        ("moveworkspacetomonitor", [ws, monitor]) => {
+                            let mut workspaces = state.workspaces.lock().unwrap();
+                            for w in workspaces.iter_mut() {
+                                if w.name == *ws {
+                                    w.monitor = monitor.to_string();
+                                }
+                            }
+                        }
+                        // renameworkspace <id> <name>.
+                        ("renameworkspace", [id, name]) => {
+                            let mut workspaces = state.workspaces.lock().unwrap();
+                            for w in workspaces.iter_mut() {
+                                if w.id.to_string() == *id {
+                                    w.name = name.to_string();
+                                }
+                            }
+                        }
+                        _ => {}
+                    }
                     Ok(ok("ok"))
                 }
                 _ => Err(io::Error::other("unexpected call")),
             }
         }
+    }
+
+    use crate::hyprctl::is_headless;
+
+    /// Shared signals so tests can assert what the fake processes received.
+    type SignalLog = Arc<Mutex<Vec<i32>>>;
+
+    struct MockChild {
+        pid: u32,
+        signals: SignalLog,
+    }
+
+    impl ChildProcess for MockChild {
+        fn pid(&self) -> u32 {
+            self.pid
+        }
+        fn signal(&mut self, sig: i32) -> io::Result<()> {
+            self.signals.lock().unwrap().push(sig);
+            Ok(())
+        }
+        fn try_wait(&mut self) -> io::Result<Option<ExitStatus>> {
+            // Fake processes exit as soon as they are signalled, so
+            // teardown tests do not burn the 3s SIGTERM grace window.
+            if self.signals.lock().unwrap().is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(ExitStatus::from_raw(0)))
+            }
+        }
+        fn wait(&mut self) -> io::Result<ExitStatus> {
+            Ok(ExitStatus::from_raw(0))
+        }
+    }
+
+    struct MockSpawner {
+        state: Arc<MockState>,
+        runtime_dir: PathBuf,
+        fail: bool,
+        next_pid: Mutex<u32>,
+    }
+
+    impl ProcessSpawner for MockSpawner {
+        fn spawn(
+            &self,
+            program: &std::path::Path,
+            args: &[String],
+            env: &[(&str, String)],
+        ) -> io::Result<Box<dyn ChildProcess>> {
+            if self.fail {
+                return Err(io::Error::other("exec format error"));
+            }
+            let mut next = self.next_pid.lock().unwrap();
+            let pid = *next;
+            *next += 2;
+            drop(next);
+            let signals: SignalLog = Default::default();
+            self.state.spawned_processes.lock().unwrap().push(SpawnedProcess {
+                program: program.display().to_string(),
+                args: args.to_vec(),
+                env: env
+                    .iter()
+                    .map(|(k, v)| (k.to_string(), v.clone()))
+                    .collect(),
+                signals_seen: signals.clone(),
+            });
+            // A spawned cage registers itself as a Hyprland client and
+            // creates its Wayland socket, like the real thing.
+            self.state
+                .clients
+                .lock()
+                .unwrap()
+                .push(client("0xcage", pid, "DP-3"));
+            std::fs::create_dir_all(&self.runtime_dir).unwrap();
+            std::fs::write(
+                crate::cage::cage_socket_path(&self.runtime_dir, CAGE_SOCKET_NAME),
+                b"",
+            )
+            .unwrap();
+            Ok(Box::new(MockChild { pid, signals }))
+        }
+    }
+
+    struct MockCapture;
+
+    impl CaptureRunner for MockCapture {
+        fn run(&self, args: &[&str]) -> io::Result<Output> {
+            assert_eq!(args, ["-o", "HEADLESS-2", "-"]);
+            let mut png = crate::screencopy::PNG_SIGNATURE.to_vec();
+            png.extend_from_slice(b"captured");
+            Ok(Output {
+                status: ExitStatus::from_raw(0),
+                stdout: png,
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    fn ws(id: i64, name: &str, monitor: &str, windows: u32) -> crate::hyprctl::Workspace {
+        crate::hyprctl::Workspace {
+            id,
+            name: name.to_string(),
+            monitor: monitor.to_string(),
+            windows,
+        }
+    }
+
+    fn make_state() -> Arc<MockState> {
+        let state = Arc::new(MockState::default());
+        *state.monitors.lock().unwrap() = vec!["DP-3".to_string()];
+        *state.workspaces.lock().unwrap() = vec![
+            ws(1, "1", "DP-3", 1),
+            ws(2, "2", "DP-3", 2),
+        ];
+        state
+    }
+
+    /// Unique per-test runtime dirs so fake cage sockets never collide.
+    fn unique_runtime_dir() -> PathBuf {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        static NEXT: AtomicUsize = AtomicUsize::new(0);
+        let n = NEXT.fetch_add(1, Ordering::SeqCst);
+        std::env::temp_dir().join(format!("staka-server-test-{}-{}", std::process::id(), n))
+    }
+
+    fn make_server(
+        state: Arc<MockState>,
+    ) -> ServerState<MockHyprland, MockSpawner, MockCapture> {
+        let runtime_dir = unique_runtime_dir();
+        ServerState::new(
+            HyprCtl::new(MockHyprland { state: state.clone() }),
+            MockSpawner {
+                state,
+                runtime_dir: runtime_dir.clone(),
+                fail: false,
+                next_pid: Mutex::new(4242),
+            },
+            MockCapture,
+            "/usr/bin/cage",
+            runtime_dir,
+        )
     }
 
     fn make_request(id: u64, command: Command) -> Request {
@@ -248,7 +856,7 @@ mod tests {
 
     #[test]
     fn health_returns_hyprland_status() {
-        let state = ServerState::new(HyprCtl::new(MockHyprland::new()));
+        let state = make_server(make_state());
         let handled = state.handle(&make_request(1, Command::Health {}));
         assert_eq!(
             handled.response,
@@ -258,25 +866,379 @@ mod tests {
     }
 
     #[test]
-    fn create_then_teardown_round_trip() {
-        let state = ServerState::new(HyprCtl::new(MockHyprland::new()));
+    fn create_workspace_without_app_adopts_the_grabbed_workspace() {
+        let mock = make_state();
+        let server = make_server(mock.clone());
 
-        let handled = state.handle(&make_request(1, Command::CreateWorkspace { app: None }));
+        let handled = server.handle(&make_request(1, Command::CreateWorkspace { app: None }));
         assert!(handled.response.ok, "{:?}", handled.response);
         assert_eq!(
             handled.response.data,
-            Some(serde_json::json!({ "output": "HEADLESS-2" }))
+            Some(serde_json::json!({
+                "output": "HEADLESS-2",
+                "workspace": "staka-agent-1",
+            }))
         );
+        // The fresh workspace Hyprland grabbed was renamed to the agent
+        // name; the user's workspaces are untouched.
+        let workspaces = mock.workspaces.lock().unwrap();
+        let agent_ws = workspaces
+            .iter()
+            .find(|w| w.name == "staka-agent-1")
+            .expect("agent workspace exists");
+        assert_eq!(agent_ws.monitor, "HEADLESS-2");
+        assert_eq!(
+            workspaces
+                .iter()
+                .find(|w| w.name == "2")
+                .map(|w| w.monitor.as_str()),
+            Some("DP-3")
+        );
+        drop(workspaces);
 
-        let handled = state.handle(&make_request(2, Command::Teardown {}));
+        let handled = server.handle(&make_request(2, Command::Teardown {}));
         assert!(handled.response.ok, "{:?}", handled.response);
         assert_eq!(
             handled.response.data,
-            Some(serde_json::json!({ "removed": ["HEADLESS-2"] }))
+            Some(serde_json::json!({
+                "removed": ["HEADLESS-2"],
+                "moved_back": [],
+                "cage_terminated": false,
+            }))
+        );
+        // Layout fully restored: monitors and workspaces as before.
+        assert_eq!(*mock.monitors.lock().unwrap(), vec!["DP-3"]);
+        assert_eq!(
+            *mock.workspaces.lock().unwrap(),
+            vec![ws(1, "1", "DP-3", 1), ws(2, "2", "DP-3", 2)]
+        );
+    }
+
+    #[test]
+    fn create_workspace_with_app_spawns_cage_and_pins_agent_workspace() {
+        let mock = make_state();
+        let server = make_server(mock.clone());
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+
+        let handled = server.handle(&make_request(
+            1,
+            Command::CreateWorkspace {
+                app: Some("gnome-calculator".into()),
+            },
+        ));
+        assert!(handled.response.ok, "{:?}", handled.response);
+        assert_eq!(
+            handled.response.data,
+            Some(serde_json::json!({
+                "output": "HEADLESS-2",
+                "workspace": "staka-agent-1",
+                "cage_pid": 4242,
+                "socket": "staka-cage",
+            }))
         );
 
-        // Nothing left to remove.
-        let handled = state.handle(&make_request(3, Command::Teardown {}));
+        // Cage was launched with the right command line and env.
+        let spawned = mock.spawned_processes.lock().unwrap();
+        assert_eq!(spawned.len(), 1);
+        assert_eq!(spawned[0].program, "/usr/bin/cage");
+        assert_eq!(
+            spawned[0].args,
+            vec![
+                "-S".to_string(),
+                "staka-cage".to_string(),
+                "-W".to_string(),
+                "1920".to_string(),
+                "-H".to_string(),
+                "1080".to_string(),
+                "--".to_string(),
+                "gnome-calculator".to_string(),
+            ]
+        );
+        assert!(spawned[0]
+            .env
+            .contains(&("WAYLAND_DISPLAY".to_string(), "wayland-1".to_string())));
+        drop(spawned);
+
+        // The fresh grabbed workspace was adopted (renamed), so the cage
+        // window was moved straight onto the output-hosting workspace: no
+        // pin needed, no user workspace touched.
+        let dispatches = mock.dispatches.lock().unwrap();
+        assert!(dispatches
+            .iter()
+            .any(|d| d == "movetoworkspacesilent staka-agent-1,address:0xcage"));
+        assert!(
+            !dispatches
+                .iter()
+                .any(|d| d.starts_with("moveworkspacetomonitor")),
+            "adopted workspace needs no pin, got {:?}",
+            *dispatches
+        );
+        drop(dispatches);
+        let workspaces = mock.workspaces.lock().unwrap();
+        let agent_ws = workspaces.iter().find(|w| w.name == "staka-agent-1");
+        assert_eq!(
+            agent_ws.map(|w| w.monitor.as_str()),
+            Some("HEADLESS-2")
+        );
+        drop(workspaces);
+
+        // Teardown kills cage and removes the output.
+        let handled = server.handle(&make_request(2, Command::Teardown {}));
+        assert!(handled.response.ok, "{:?}", handled.response);
+        assert_eq!(
+            handled.response.data,
+            Some(serde_json::json!({
+                "removed": ["HEADLESS-2"],
+                "moved_back": [],
+                "cage_terminated": true,
+            }))
+        );
+        assert_eq!(*mock.monitors.lock().unwrap(), vec!["DP-3"]);
+    }
+
+    #[test]
+    fn create_workspace_pins_and_restores_when_hyprland_grabs_a_user_workspace() {
+        // Some Hyprland states make the output grab one of the user's
+        // workspaces instead of a fresh one. The driver must give it back
+        // and pin its own workspace instead.
+        let mock = make_state();
+        mock.grab_user
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let server = make_server(mock.clone());
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+
+        let handled = server.handle(&make_request(
+            1,
+            Command::CreateWorkspace {
+                app: Some("foot".into()),
+            },
+        ));
+        assert!(handled.response.ok, "{:?}", handled.response);
+
+        // User workspace 2 was given back; the agent workspace is on the
+        // invisible output.
+        let workspaces = mock.workspaces.lock().unwrap();
+        assert_eq!(
+            workspaces
+                .iter()
+                .find(|w| w.name == "2")
+                .map(|w| w.monitor.as_str()),
+            Some("DP-3"),
+            "user workspace must be given back"
+        );
+        let agent_ws = workspaces
+            .iter()
+            .find(|w| w.name.starts_with("staka-agent-"))
+            .expect("agent workspace exists");
+        assert_eq!(agent_ws.monitor, "HEADLESS-2");
+        drop(workspaces);
+        assert!(mock
+            .dispatches
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|d| d.contains("moveworkspacetomonitor")));
+
+        let handled = server.handle(&make_request(2, Command::Teardown {}));
+        assert!(handled.response.ok, "{:?}", handled.response);
+        assert_eq!(*mock.monitors.lock().unwrap(), vec!["DP-3"]);
+    }
+
+    #[test]
+    fn create_workspace_never_hijacks_a_user_workspace_number() {
+        // The point of the whole exercise: the mock Hyprland starts with
+        // user workspaces 1 and 2 on DP-3, and the agent workspace must be
+        // a prefixed named workspace, never "2".
+        let mock = make_state();
+        let server = make_server(mock.clone());
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+
+        let handled = server.handle(&make_request(
+            1,
+            Command::CreateWorkspace {
+                app: Some("foot".into()),
+            },
+        ));
+        assert!(handled.response.ok);
+        let workspace = handled.response.data.unwrap()["workspace"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(workspace.starts_with("staka-agent-"));
+        // User workspaces untouched.
+        let workspaces = mock.workspaces.lock().unwrap();
+        assert!(workspaces.iter().any(|w| w.name == "2"));
+        assert_eq!(
+            workspaces
+                .iter()
+                .find(|w| w.name == "2")
+                .map(|w| w.monitor.as_str()),
+            Some("DP-3")
+        );
+    }
+
+    #[test]
+    fn second_create_is_rejected_until_teardown() {
+        let server = make_server(make_state());
+        let handled = server.handle(&make_request(1, Command::CreateWorkspace { app: None }));
+        assert!(handled.response.ok);
+        let handled = server.handle(&make_request(2, Command::CreateWorkspace { app: None }));
+        assert!(!handled.response.ok);
+        assert!(handled
+            .response
+            .error
+            .unwrap()
+            .contains("already active"));
+    }
+
+    #[test]
+    fn failed_cage_launch_cleans_up_output_and_reports() {
+        let mock = make_state();
+        let server = {
+            let spawner = MockSpawner {
+                state: mock.clone(),
+                runtime_dir: unique_runtime_dir(),
+                fail: true,
+                next_pid: Mutex::new(4242),
+            };
+            ServerState::new(
+                HyprCtl::new(MockHyprland { state: mock.clone() }),
+                spawner,
+                MockCapture,
+                "/usr/bin/cage",
+                unique_runtime_dir(),
+            )
+        };
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+
+        let handled = server.handle(&make_request(
+            1,
+            Command::CreateWorkspace {
+                app: Some("foot".into()),
+            },
+        ));
+        assert!(!handled.response.ok);
+        // The headless output was rolled back; nothing lingers.
+        assert_eq!(*mock.monitors.lock().unwrap(), vec!["DP-3"]);
+        assert!(server.session.lock().unwrap().is_none());
+    }
+
+    #[test]
+    fn screenshot_requires_a_session() {
+        let server = make_server(make_state());
+        let handled = server.handle(&make_request(
+            1,
+            Command::Screenshot {
+                format: ImageFormat::Png,
+            },
+        ));
+        assert!(!handled.response.ok);
+    }
+
+    #[test]
+    fn screenshot_returns_binary_frame_payload() {
+        let server = make_server(make_state());
+        let _ = server.handle(&make_request(1, Command::CreateWorkspace { app: None }));
+        let handled = server.handle(&make_request(
+            2,
+            Command::Screenshot {
+                format: ImageFormat::Png,
+            },
+        ));
+        assert!(handled.response.ok);
+        assert_eq!(
+            handled.response.data,
+            Some(serde_json::json!({ "binary": true }))
+        );
+        let png = handled.binary.expect("screenshot must carry bytes");
+        assert!(crate::screencopy::is_png(&png));
+        assert!(png.ends_with(b"captured"));
+    }
+
+    #[test]
+    fn run_app_spawns_into_the_cage_socket() {
+        let mock = make_state();
+        let server = make_server(mock.clone());
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+
+        let handled = server.handle(&make_request(1, Command::RunApp { app: "foot".into() }));
+        assert!(!handled.response.ok, "no session yet");
+
+        let _ = server.handle(&make_request(2, Command::CreateWorkspace { app: None }));
+        let handled = server.handle(&make_request(
+            3,
+            Command::RunApp { app: "foot".into() },
+        ));
+        assert!(!handled.response.ok, "no cage in this session");
+
+        let _ = server.handle(&make_request(4, Command::Teardown {}));
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+        let _ = server.handle(&make_request(
+            5,
+            Command::CreateWorkspace {
+                app: Some("foot".into()),
+            },
+        ));
+        let handled = server.handle(&make_request(
+            6,
+            Command::RunApp {
+                app: "libreoffice --calc".into(),
+            },
+        ));
+        assert!(handled.response.ok, "{:?}", handled.response);
+        assert_eq!(
+            handled.response.data,
+            Some(serde_json::json!({ "pid": 4244 }))
+        );
+        let spawned = mock.spawned_processes.lock().unwrap();
+        let last = spawned.last().unwrap();
+        assert_eq!(last.program, "libreoffice");
+        assert_eq!(last.args, vec!["--calc".to_string()]);
+        assert_eq!(
+            last.env,
+            vec![("WAYLAND_DISPLAY".to_string(), "staka-cage".to_string())]
+        );
+    }
+
+    #[test]
+    fn teardown_kills_spawned_apps_before_the_cage() {
+        let mock = make_state();
+        let server = make_server(mock.clone());
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+        let _ = server.handle(&make_request(
+            1,
+            Command::CreateWorkspace {
+                app: Some("foot".into()),
+            },
+        ));
+        let _ = server.handle(&make_request(
+            2,
+            Command::RunApp { app: "xterm".into() },
+        ));
+
+        let handled = server.handle(&make_request(3, Command::Teardown {}));
+        assert!(handled.response.ok, "{:?}", handled.response);
+
+        let signals: Vec<Vec<i32>> = mock
+            .spawned_processes
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|p| p.signals_seen.lock().unwrap().clone())
+            .collect();
+        for seen in signals {
+            assert!(
+                seen.contains(&SIGTERM),
+                "every spawned app must be terminated, saw {:?}",
+                seen
+            );
+        }
+    }
+
+    #[test]
+    fn teardown_without_session_reports_empty() {
+        let server = make_server(make_state());
+        let handled = server.handle(&make_request(1, Command::Teardown {}));
         assert!(handled.response.ok);
         assert_eq!(
             handled.response.data,
@@ -285,61 +1247,67 @@ mod tests {
     }
 
     #[test]
-    fn teardown_reports_and_survives_removal_errors() {
-        let mut mock = MockHyprland::new();
-        mock.remove_fails = Some("error".to_string());
-        let state = ServerState::new(HyprCtl::new(mock));
-
-        let _handled = state.handle(&make_request(1, Command::CreateWorkspace { app: None }));
-        let handled = state.handle(&make_request(2, Command::Teardown {}));
-        assert!(!handled.response.ok);
-        // The output stays registered so teardown can be retried.
-        assert_eq!(state.created_outputs.lock().unwrap().len(), 1);
-    }
-
-    #[test]
-    fn create_with_app_is_rejected_until_cage_lands() {
-        let state = ServerState::new(HyprCtl::new(MockHyprland::new()));
-        let handled = state.handle(&make_request(
+    fn teardown_keeps_session_for_retry_when_output_removal_fails() {
+        let mock = make_state();
+        let server = make_server(mock.clone());
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+        let _ = server.handle(&make_request(
             1,
             Command::CreateWorkspace {
-                app: Some("gnome-calculator".into()),
+                app: Some("foot".into()),
             },
         ));
+
+        mock.remove_fails
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let handled = server.handle(&make_request(2, Command::Teardown {}));
         assert!(!handled.response.ok);
-        assert!(handled
-            .response
-            .error
-            .unwrap()
-            .contains("nested compositor"));
+        // Cage was terminated already; the output stays registered so a
+        // retry only has to remove the output.
+        assert!(server.session.lock().unwrap().is_some());
+        assert_eq!(*mock.monitors.lock().unwrap(), vec!["DP-3", "HEADLESS-2"]);
+
+        mock.remove_fails
+            .store(false, std::sync::atomic::Ordering::SeqCst);
+        let handled = server.handle(&make_request(3, Command::Teardown {}));
+        assert!(handled.response.ok, "{:?}", handled.response);
+        assert!(server.session.lock().unwrap().is_none());
+        assert_eq!(*mock.monitors.lock().unwrap(), vec!["DP-3"]);
     }
 
     #[test]
-    fn create_failure_is_reported() {
-        struct CreateFails;
-        impl CommandRunner for CreateFails {
-            fn run(&self, args: &[&str]) -> io::Result<Output> {
-                match args {
-                    ["monitors", "-j"] => Ok(ok(BASE_MONITORS)),
-                    ["output", "create", "headless"] => Ok(failed("error creating output")),
-                    _ => Err(io::Error::other("unexpected call")),
-                }
-            }
+    fn teardown_reports_layout_restore_moves() {
+        let mock = make_state();
+        let server = make_server(mock.clone());
+        let _ = server.handle(&make_request(1, Command::CreateWorkspace { app: None }));
+        // Simulate a user workspace drifting onto the headless output
+        // while the session was active.
+        {
+            let mut workspaces = mock.workspaces.lock().unwrap();
+            workspaces.retain(|w| w.name != "2");
+            workspaces.push(ws(2, "2", "HEADLESS-2", 2));
         }
-        let state = ServerState::new(HyprCtl::new(CreateFails));
-        let handled = state.handle(&make_request(1, Command::CreateWorkspace { app: None }));
-        assert!(!handled.response.ok);
-        assert!(state.created_outputs.lock().unwrap().is_empty());
+
+        let handled = server.handle(&make_request(2, Command::Teardown {}));
+        assert!(handled.response.ok, "{:?}", handled.response);
+        assert_eq!(
+            handled.response.data,
+            Some(serde_json::json!({
+                "removed": ["HEADLESS-2"],
+                "moved_back": ["2"],
+                "cage_terminated": false,
+            }))
+        );
+        assert_eq!(
+            *mock.workspaces.lock().unwrap(),
+            vec![ws(1, "1", "DP-3", 1), ws(2, "2", "DP-3", 2)]
+        );
     }
 
     #[test]
-    fn unimplemented_commands_report_clear_errors() {
-        let state = ServerState::new(HyprCtl::new(MockHyprland::new()));
+    fn virtual_input_commands_still_report_not_implemented() {
+        let server = make_server(make_state());
         let commands = [
-            Command::RunApp { app: "x".into() },
-            Command::Screenshot {
-                format: ImageFormat::Png,
-            },
             Command::Click {
                 x: 1,
                 y: 2,
@@ -352,75 +1320,62 @@ mod tests {
             },
         ];
         for cmd in commands {
-            let handled = state.handle(&make_request(7, cmd));
+            let handled = server.handle(&make_request(7, cmd));
             assert!(!handled.response.ok);
             assert!(handled.response.error.unwrap().contains("not implemented"));
         }
     }
 
     #[test]
-    fn serve_connection_round_trips_over_socketpair() {
-        let (client, mut server) = UnixStream::pair().unwrap();
-        let state = ServerState::new(HyprCtl::new(MockHyprland::new()));
+    fn serve_connection_round_trips_screenshot_as_two_frames() {
+        let (client, mut server_stream) = UnixStream::pair().unwrap();
+        let server_state = make_server(make_state());
         let server_thread = std::thread::spawn(move || {
-            serve_connection(&mut server, &state).unwrap();
+            serve_connection(&mut server_stream, &server_state).unwrap();
         });
 
         let mut client_w = client.try_clone().unwrap();
         let mut client_r = client.try_clone().unwrap();
 
-        let req = make_request(42, Command::Health {});
         client_w
-            .write_all(&crate::ipc::encode_request(&req).unwrap().encode())
+            .write_all(
+                &crate::ipc::encode_request(&make_request(
+                    1,
+                    Command::CreateWorkspace { app: None },
+                ))
+                .unwrap()
+                .encode(),
+            )
+            .unwrap();
+        client_w
+            .write_all(
+                &crate::ipc::encode_request(&make_request(
+                    2,
+                    Command::Screenshot {
+                        format: ImageFormat::Png,
+                    },
+                ))
+                .unwrap()
+                .encode(),
+            )
             .unwrap();
         client_w.flush().unwrap();
 
         let frame = read_frame(&mut client_r).unwrap().unwrap();
         assert_eq!(frame.frame_type, FRAME_TYPE_JSON);
         let resp = parse_response(&frame.payload).unwrap();
-        assert_eq!(resp.id, 42);
+        assert_eq!(resp.id, 1);
         assert!(resp.ok);
 
-        // Second request: create_workspace over the same connection.
-        let req = make_request(43, Command::CreateWorkspace { app: None });
-        client_w
-            .write_all(&crate::ipc::encode_request(&req).unwrap().encode())
-            .unwrap();
-        client_w.flush().unwrap();
         let frame = read_frame(&mut client_r).unwrap().unwrap();
+        assert_eq!(frame.frame_type, FRAME_TYPE_JSON);
         let resp = parse_response(&frame.payload).unwrap();
-        assert_eq!(resp.id, 43);
-        assert_eq!(
-            resp.data,
-            Some(serde_json::json!({ "output": "HEADLESS-2" }))
-        );
-
-        // Closing the socket ends the server loop cleanly.
-        drop(client_w);
-        drop(client_r);
-        drop(client);
-        server_thread.join().unwrap();
-    }
-
-    #[test]
-    fn serve_connection_answers_malformed_request_with_error() {
-        let (client, mut server) = UnixStream::pair().unwrap();
-        let state = ServerState::new(HyprCtl::new(MockHyprland::new()));
-        let server_thread = std::thread::spawn(move || {
-            serve_connection(&mut server, &state).unwrap();
-        });
-
-        let mut client_w = client.try_clone().unwrap();
-        let mut client_r = client.try_clone().unwrap();
-        client_w
-            .write_all(&Frame::json(b"{not json".to_vec()).encode())
-            .unwrap();
-        client_w.flush().unwrap();
+        assert_eq!(resp.id, 2);
+        assert_eq!(resp.data, Some(serde_json::json!({ "binary": true })));
 
         let frame = read_frame(&mut client_r).unwrap().unwrap();
-        let resp = parse_response(&frame.payload).unwrap();
-        assert_eq!(resp.id, 0);
-        assert!(!resp.ok);
+        assert_eq!(frame.frame_type, crate::ipc::FRAME_TYPE_BINARY);
+        assert!(crate::screencopy::is_png(&frame.payload));
 
         drop(client_w);
         drop(client_r);
@@ -428,3 +1383,4 @@ mod tests {
         server_thread.join().unwrap();
     }
 }
+
