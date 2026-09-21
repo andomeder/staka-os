@@ -6,6 +6,7 @@ import { machines, usageLogs, users } from "../db/schema.ts";
 import type { JwtKeyring } from "../lib/jwt.ts";
 import type { MachineStatusCache } from "../lib/machine-status-cache.ts";
 import { machineBearerAuth } from "../middleware/machine-auth.ts";
+import { latestSkillPack } from "../lib/skill-packs.ts";
 
 export type ConfigDeps = {
   dbApp: Db;
@@ -50,7 +51,14 @@ export function configRoutes(deps: ConfigDeps) {
       payload: {},
     });
 
-    return c.json(buildConfig(deps.orgName));
+    const config = buildConfig(deps.orgName);
+    const latest = await latestSkillPack(deps.dbApp).catch(() => null);
+    if (latest) {
+      config.features.skills_sync = true;
+      config.skill_pack_url = "/v1/skill-packs/pull";
+      config.skill_pack_hash = latest.sha256;
+    }
+    return c.json(config);
   });
 
   app.get("/v1/machines/me", auth, async (c) => {

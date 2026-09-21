@@ -15,6 +15,11 @@ import { dashboardRoutes } from "./routes/dashboard.tsx";
 import { healthRoutes, type HealthDeps } from "./routes/health.ts";
 import { configRoutes } from "./routes/config.ts";
 import { kbRoutes } from "./routes/kb.ts";
+import {
+  skillPackAdminRoutes,
+  skillPackMachineRoutes,
+} from "./routes/skill-packs.ts";
+import { ingestPackSkills, parsePackBytes } from "./lib/skill-packs.ts";
 
 export type AppDeps = HealthDeps & {
   logger?: {
@@ -140,6 +145,44 @@ export function createApp(deps: AppDeps = {}) {
     if (deps.statusCache) kbDeps.statusCache = deps.statusCache;
     if (deps.kb) kbDeps.kb = deps.kb;
     app.route("/", kbRoutes(kbDeps));
+
+    if (deps.dbAdmin && deps.sessions) {
+      const kbIngestDeps = deps.kb
+        ? {
+            db: deps.dbAdmin,
+            client: deps.kb.client,
+            space: deps.kb.space,
+            orgId: deps.kb.space.slice("org_".length),
+          }
+        : undefined;
+      app.route(
+        "/",
+        skillPackAdminRoutes({
+          dbApp: deps.dbApp,
+          dbAdmin: deps.dbAdmin,
+          keyring: deps.keyring,
+          sessions: deps.sessions,
+          parseAndIndex: kbIngestDeps
+            ? async (bytes: Uint8Array) => {
+                const skills = await parsePackBytes(bytes);
+                try {
+                  await ingestPackSkills(kbIngestDeps, skills);
+                  return { skills, indexed: true };
+                } catch {
+                  return { skills, indexed: false };
+                }
+              }
+            : undefined,
+        }),
+      );
+    }
+
+    const packDeps: Parameters<typeof skillPackMachineRoutes>[0] = {
+      dbApp: deps.dbApp,
+      keyring: deps.keyring,
+    };
+    if (deps.statusCache) packDeps.statusCache = deps.statusCache;
+    app.route("/", skillPackMachineRoutes(packDeps));
   }
 
   app.notFound((c) =>

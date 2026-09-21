@@ -36,6 +36,13 @@
       "when": 1790031709250,
       "tag": "0004_kb_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1790032439827,
+      "tag": "0005_skill_packs",
+      "breakpoints": true
     }
   ]
 }

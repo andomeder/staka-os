@@ -7,6 +7,7 @@ import { createAgent } from "./agent-factory.ts";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { loadSkills, type SourcedSkill } from "./skills/loader.ts";
 import { ensureOrgSkillSymlink } from "./skills/symlink.ts";
+import { syncSkillPack } from "./skills/pack-sync.ts";
 import { shouldRunCurator, runCurator } from "./skills/curator.ts";
 import { getSnapshot } from "./memory/personal.ts";
 
@@ -76,6 +77,15 @@ export async function serve(env: Env) {
     state.orgName = config.org_name;
     state.configVersion = config.version;
     state.status = "active";
+
+    const pack = await syncSkillPack(env, boot.orgUrl, boot.token, config);
+    if (pack.updated) {
+      console.log(
+        `skill pack updated: ${pack.skillCount} skills at ${pack.path}`,
+      );
+    } else if (pack.reason === "hash_mismatch" || pack.reason === "invalid_pack") {
+      console.error(`skill pack sync refused: ${pack.reason}`);
+    }
 
     ensureOrgSkillSymlink();
     const loaded = await loadSkills();
