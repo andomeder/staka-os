@@ -28,6 +28,7 @@ export async function createTestApp(opts: {
   autoApproveActorId?: string;
   trustProxy?: boolean;
   secureCookies?: boolean;
+  kb?: Parameters<typeof createApp>[0]["kb"];
 }) {
   const jwtKeysJson = opts.jwtKeysJson ?? testJwtKeysJson();
   const keyring = await loadKeyring(jwtKeysJson);
@@ -53,6 +54,7 @@ export async function createTestApp(opts: {
     appDeps.autoApproveActorId = opts.autoApproveActorId;
   }
   if (opts.trustProxy !== undefined) appDeps.trustProxy = opts.trustProxy;
+  if (opts.kb !== undefined) appDeps.kb = opts.kb;
   const app = createApp(appDeps);
   return {
     app,
