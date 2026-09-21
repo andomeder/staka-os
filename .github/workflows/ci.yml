@@ -55,6 +55,9 @@ jobs:
       - name: Unit and integration tests
         run: bun run test
 
+      - name: Shell syntax check (installer scripts)
+        run: bash scripts/check-shell-syntax.sh
+
       - name: drizzle-kit check
         working-directory: packages/org-server
         run: bun run db:check
