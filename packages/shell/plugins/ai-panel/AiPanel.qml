@@ -132,7 +132,12 @@ Item {
   PanelWindow {
     id: panel
     visible: root.opened
-    anchors { top: true; bottom: true; right: true }
+    // Anchor all four edges like the launcher/menu overlays: a partially
+    // anchored PanelWindow sizes its free dimension from the window's
+    // implicit size, which this content never provides - the layer surface
+    // would be created zero-width (invisible while still grabbing
+    // exclusive keyboard focus).
+    anchors { top: true; bottom: true; left: true; right: true }
     color: "transparent"
     WlrLayershell.namespace: "staka-ai-panel"
     WlrLayershell.layer: WlrLayer.Overlay
