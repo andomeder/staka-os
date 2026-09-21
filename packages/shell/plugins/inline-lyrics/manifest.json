@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "id": "staka.inline-lyrics",
+  "name": "Inline Lyrics",
+  "version": "0.1.0",
+  "author": "cloudsurfer",
+  "description": "Synced lyrics in the bar, with explicit MPRIS player filtering.",
+  "kinds": ["service", "bar-widget"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Inline Lyrics",
+    "description": "Requires the bundled, locally built lrcsnc backend.",
+    "category": "Media",
+    "allowMultiple": false,
+    "defaultSection": "left",
+    "defaults": {
+      "players": "spotify",
+      "ignoredPlayers": "mpv,mpvpaper,chromium,firefox,brave,zen",
+      "maxWidth": 380
+    },
+    "schema": [
+      {
+        "key": "players",
+        "type": "string",
+        "label": "Allowed players",
+        "description": "Comma-separated, case-sensitive MPRIS name fragments. Empty allows any player not ignored. No fallback outside this list.",
+        "defaultValue": "spotify"
+      },
+      {
+        "key": "ignoredPlayers",
+        "type": "string",
+        "label": "Ignored players",
+        "description": "Comma-separated MPRIS name fragments. Ignores take precedence. Websites usually share the browser identity.",
+        "defaultValue": "mpv,mpvpaper,chromium,firefox,brave,zen"
+      },
+      {
+        "key": "maxWidth",
+        "type": "integer",
+        "label": "Maximum lyric width",
+        "min": 100,
+        "max": 800,
+        "step": 10,
+        "defaultValue": 380
+      }
+    ]
+  }
+}

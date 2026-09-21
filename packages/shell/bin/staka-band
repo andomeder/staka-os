@@ -1,0 +1,96 @@
+#!/bin/bash
+
+# staka:summary=Manage and apply Staka perimeter band geometry to Hyprland
+# staka:args=[apply|status|set-thickness <px>]
+# staka:examples=staka-band apply | staka-band set-thickness 48
+
+cmd=${1:-apply}
+
+script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" &>/dev/null && pwd)
+export STAKA_SHELL_PATH=${STAKA_SHELL_PATH:-$(dirname -- "$script_dir")}
+
+user_config="${HOME}/.config/staka/shell.json"
+builtin_config="${STAKA_SHELL_PATH}/config/staka/shell.json"
+
+read_config() {
+  if [[ -f "$user_config" ]]; then
+    cat "$user_config"
+  elif [[ -f "$builtin_config" ]]; then
+    cat "$builtin_config"
+  else
+    echo '{"version":2,"band":{"edges":["top"],"thickness":44,"innerMargin":10,"rounding":10}}'
+  fi
+}
+
+apply_band() {
+  local cfg
+  cfg=$(read_config)
+
+  local thickness
+  thickness=$(echo "$cfg" | jq -r '.band.thickness // .bar.thickness // 44' 2>/dev/null || echo 44)
+  local inner_margin
+  inner_margin=$(echo "$cfg" | jq -r '.band.innerMargin // 10' 2>/dev/null || echo 10)
+  local rounding
+  rounding=$(echo "$cfg" | jq -r '.band.rounding // 10' 2>/dev/null || echo 10)
+  local active_border
+  active_border=$(echo "$cfg" | jq -r '.band.activeBorder // "rgba(1E5EFFee) rgba(3B7BFFee) 45deg"' 2>/dev/null || echo "rgba(1E5EFFee) rgba(3B7BFFee) 45deg")
+  local inactive_border
+  inactive_border=$(echo "$cfg" | jq -r '.band.inactiveBorder // "rgba(1E2A44aa)"' 2>/dev/null || echo "rgba(1E2A44aa)")
+
+  local edges
+  edges=$(echo "$cfg" | jq -r '.band.edges[]?' 2>/dev/null)
+  [[ -z "$edges" ]] && edges="top"
+
+  local has_top=0 has_right=0 has_bottom=0 has_left=0
+  for e in $edges; do
+    case "$e" in
+      top) has_top=1 ;;
+      right) has_right=1 ;;
+      bottom) has_bottom=1 ;;
+      left) has_left=1 ;;
+    esac
+  done
+
+  local top_gap=$inner_margin
+  local right_gap=$inner_margin
+  local bottom_gap=$inner_margin
+  local left_gap=$inner_margin
+
+  (( has_top )) && top_gap=$(( thickness + inner_margin ))
+  (( has_right )) && right_gap=$(( thickness + inner_margin ))
+  (( has_bottom )) && bottom_gap=$(( thickness + inner_margin ))
+  (( has_left )) && left_gap=$(( thickness + inner_margin ))
+
+  echo "Applying Staka perimeter band to Hyprland:"
+  echo "  gaps_out: top=$top_gap right=$right_gap bottom=$bottom_gap left=$left_gap"
+  echo "  gaps_in: 10, rounding: $rounding"
+  echo "  active_border: $active_border"
+
+  hyprctl --batch "keyword general:gaps_out $top_gap $right_gap $bottom_gap $left_gap; keyword general:gaps_in 10; keyword decoration:rounding $rounding; keyword general:col.active_border $active_border; keyword general:col.inactive_border $inactive_border"
+}
+
+case "$cmd" in
+  apply)
+    apply_band
+    ;;
+  status)
+    echo "Current Hyprland configuration:"
+    hyprctl -j getoption general:gaps_out
+    hyprctl -j getoption decoration:rounding
+    hyprctl -j getoption general:col.active_border
+    ;;
+  set-thickness)
+    new_thick=${2:-44}
+    if [[ -f "$user_config" ]]; then
+      jq --argjson t "$new_thick" '.band.thickness = $t' "$user_config" > "${user_config}.tmp" && mv "${user_config}.tmp" "$user_config"
+      apply_band
+    else
+      echo "No ~/.config/staka/shell.json found. Create one first." >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "Usage: staka-band [apply|status|set-thickness <px>]"
+    exit 1
+    ;;
+esac

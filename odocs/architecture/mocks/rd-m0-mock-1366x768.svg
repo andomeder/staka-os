@@ -1,0 +1,207 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1366 768" width="1366" height="768" fill="none">
+  <defs>
+    <!-- Background Wallpaper embedded in mock -->
+    <linearGradient id="mock-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#070B14"/>
+      <stop offset="50%" stop-color="#0B1220"/>
+      <stop offset="100%" stop-color="#04070D"/>
+    </linearGradient>
+    <radialGradient id="mock-glow" cx="80%" cy="20%" r="60%">
+      <stop offset="0%" stop-color="#1E5EFF" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#070B14" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Shell Band Glass Gradient -->
+    <linearGradient id="band-surface" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#111A2E" stop-opacity="0.94"/>
+      <stop offset="100%" stop-color="#0D1525" stop-opacity="0.92"/>
+    </linearGradient>
+
+    <!-- Active Window Border Gradient -->
+    <linearGradient id="win-border-active" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1E5EFF"/>
+      <stop offset="100%" stop-color="#3B7BFF"/>
+    </linearGradient>
+
+    <!-- Liquid Drop Shadow -->
+    <filter id="drop-shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="16" stdDeviation="24" flood-color="#000000" flood-opacity="0.6"/>
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#1E5EFF" flood-opacity="0.25"/>
+    </filter>
+
+    <style>
+      text { font-family: 'Inter', -apple-system, system-ui, sans-serif; }
+      .pill { rx: 6px; }
+    </style>
+  </defs>
+
+  <!-- 1. BASE DESKTOP WALLPAPER -->
+  <rect width="1366" height="768" fill="url(#mock-bg)"/>
+  <rect width="1366" height="768" fill="url(#mock-glow)"/>
+
+  <!-- Subtle watermark on desktop -->
+  <g transform="translate(751.3000000000001, 345.6) scale(0.32015625)" opacity="0.1">
+    <rect x="0" y="0" width="460" height="110" rx="32" fill="#1E5EFF"/>
+    <rect x="100" y="145" width="460" height="110" rx="32" fill="#3B7BFF"/>
+    <rect x="0" y="290" width="460" height="110" rx="32" fill="#0B2F8A"/>
+  </g>
+
+  <!-- 2. INSET TILED WINDOW (Inside the Frame) -->
+  <g>
+    <!-- Window Border & Body -->
+    <rect x="46" y="46" width="1310" height="712" rx="10" fill="#0D1322" fill-opacity="0.96" stroke="url(#win-border-active)" stroke-width="2.5"/>
+
+    <!-- Window Titlebar / Interior Header -->
+    <rect x="46" y="46" width="1310" height="38" rx="10" fill="#111A2E" fill-opacity="0.8"/>
+    <!-- Window Controls / Dots -->
+    <circle cx="66" cy="65" r="5.5" fill="#D64545"/>
+    <circle cx="84" cy="65" r="5.5" fill="#D29922"/>
+    <circle cx="102" cy="65" r="5.5" fill="#3FB950"/>
+    <text x="126" y="70" font-size="13" font-weight="500" fill="#7C8AA5">cloudsurfer@staka: ~/projects/stakaos (zsh)</text>
+
+    <!-- Terminal Code / Neovim Content Mock -->
+    <g transform="translate(70, 110)" font-family="'JetBrains Mono', 'Fira Code', monospace" font-size="13.5" fill="#E6ECF8">
+      <text y="0" fill="#7C8AA5"># Staka Shell Redesign v1 - The Band Architecture</text>
+      <text y="24" fill="#3B7BFF">import</text><text x="60" y="24"> { BandCoupler, BandDrop } </text><text x="270" y="24" fill="#3B7BFF">from</text><text x="315" y="24" fill="#3FB950"> "qs.Commons"</text>
+      <text y="54" fill="#7C8AA5">// Hyprland coupling: windows inset inside continuous perimeter frame</text>
+      <text y="78"><tspan fill="#3B7BFF">const</tspan> bandConfig = {</text>
+      <text y="102" fill="#E6ECF8">  edges: [<tspan fill="#3FB950">"top"</tspan>, <tspan fill="#3FB950">"left"</tspan>],</text>
+      <text y="126" fill="#E6ECF8">  thickness: <tspan fill="#D29922">36</tspan>,</text>
+      <text y="150" fill="#E6ECF8">  activeBorder: <tspan fill="#3FB950">"rgba(1E5EFFee) rgba(3B7BFFee) 45deg"</tspan>,</text>
+      <text y="174" fill="#E6ECF8">  dropAnimation: <tspan fill="#3FB950">"liquid-spring-280ms"</tspan></text>
+      <text y="198">};</text>
+      <text y="238" fill="#3FB950">✔ Compositor connected to /run/user/1000/staka/compositor.sock</text>
+      <text y="262" fill="#3B7BFF">★ Liquid-drop popup engine initialized (anchor: nearest-rail)</text>
+    </g>
+  </g>
+
+  <!-- 3. PERIMETER BAND (Top Band Edge-to-Edge) -->
+  <g>
+    <!-- Top Band Surface -->
+    <rect x="0" y="0" width="1366" height="36" fill="url(#band-surface)"/>
+    <line x1="0" y1="36" x2="1366" y2="36" stroke="#1E2A44" stroke-width="1"/>
+
+    <!-- Left Rail Surface (Optional vertical rail) -->
+    
+
+    <!-- Top Band Modules: Left Section -->
+    <g transform="translate(16, 5)">
+      <!-- Staka Brand Mark Small -->
+      <g transform="translate(0, 3) scale(0.32)">
+        <rect x="0" y="0" width="36" height="12" rx="3.5" fill="#3B7BFF"/>
+        <rect x="8" y="18" width="36" height="12" rx="3.5" fill="#609AFF"/>
+        <rect x="0" y="36" width="36" height="12" rx="3.5" fill="#1E5EFF"/>
+      </g>
+
+      <!-- Workspace Pills -->
+      <g transform="translate(32, 0)">
+        <!-- Workspace 1 (Active) -->
+        <rect x="0" y="0" width="28" height="26" rx="6" fill="#1E5EFF"/>
+        <text x="14" y="17" font-size="12" font-weight="700" fill="#FFFFFF" text-anchor="middle">1</text>
+
+        <!-- Inactive Workspaces -->
+        <rect x="34" y="0" width="24" height="26" rx="6" fill="#16213A" fill-opacity="0.8"/>
+        <text x="46" y="17" font-size="12" font-weight="500" fill="#7C8AA5" text-anchor="middle">2</text>
+
+        <rect x="64" y="0" width="24" height="26" rx="6" fill="#16213A" fill-opacity="0.8"/>
+        <text x="76" y="17" font-size="12" font-weight="500" fill="#7C8AA5" text-anchor="middle">3</text>
+
+        <rect x="94" y="0" width="24" height="26" rx="6" fill="#16213A" fill-opacity="0.8"/>
+        <text x="106" y="17" font-size="12" font-weight="500" fill="#7C8AA5" text-anchor="middle">4</text>
+      </g>
+
+      <!-- Active Window Ticker Title -->
+      <g transform="translate(170, 0)">
+        <rect x="0" y="0" width="260" height="26" rx="6" fill="#16213A" fill-opacity="0.6" stroke="#1E2A44" stroke-width="1"/>
+        <circle cx="14" cy="13" r="4" fill="#3FB950"/>
+        <text x="26" y="17" font-size="12" font-weight="500" fill="#E6ECF8">kitty: ~/projects/stakaos</text>
+      </g>
+
+      <!-- Inline lyrics teaser pill in bar -->
+      <g transform="translate(440, 0)">
+        <rect x="0" y="0" width="240" height="26" rx="6" fill="#16213A" fill-opacity="0.6" stroke="#1E2A44" stroke-width="1"/>
+        <text x="12" y="17" font-size="12" font-weight="500" fill="#3B7BFF">♪  Neon lights reflect in rain</text>
+      </g>
+    </g>
+
+    <!-- Top Band Modules: Center Section -->
+    <g transform="translate(553, 5)">
+      <rect x="0" y="0" width="260" height="26" rx="6" fill="#16213A" fill-opacity="0.7" stroke="#1E2A44" stroke-width="1"/>
+      <text x="130" y="17" font-size="12.5" font-weight="600" fill="#E6ECF8" text-anchor="middle">Mon 21 Sep  23:48  •  22°C Clear</text>
+    </g>
+
+    <!-- Top Band Modules: Right Section (System Stats, AI Agent, Audio, Power) -->
+    <g transform="translate(886, 5)">
+      <!-- RAM / CPU Stats Mode: labels -->
+      <rect x="0" y="0" width="135" height="26" rx="6" fill="#16213A" fill-opacity="0.6" stroke="#1E2A44" stroke-width="1"/>
+      <text x="10" y="17" font-size="11.5" font-weight="600" fill="#7C8AA5">CPU <tspan fill="#3B7BFF">14%</tspan>  RAM <tspan fill="#3B7BFF">4.2G</tspan></text>
+
+      <!-- AI Panel Toggle Pill -->
+      <g transform="translate(145, 0)">
+        <rect x="0" y="0" width="80" height="26" rx="6" fill="#1E5EFF" fill-opacity="0.2" stroke="#1E5EFF" stroke-width="1"/>
+        <text x="40" y="17" font-size="11.5" font-weight="700" fill="#609AFF" text-anchor="middle">✦ AGENT</text>
+      </g>
+
+      <!-- Network / Volume / Battery / Power -->
+      <g transform="translate(235, 0)">
+        <rect x="0" y="0" width="180" height="26" rx="6" fill="#16213A" fill-opacity="0.6" stroke="#1E2A44" stroke-width="1"/>
+        <text x="90" y="17" font-size="12" font-weight="500" fill="#E6ECF8" text-anchor="middle">📶  🔊 82%  🔋 100%  ⏻</text>
+      </g>
+    </g>
+  </g>
+
+  <!-- 4. LIQUID-DROP WIDGET: Media Player & Synchronized Lyrics Drop-Out -->
+  <!-- Anchored to the top band right beneath the lyrics indicator -->
+  <g transform="translate(430, 46)" filter="url(#drop-shadow)">
+    <!-- Droplet Neck Connector (Liquid Drop Visual) -->
+    <path d="M120,-10 C120,-4 110,0 90,0 L260,0 C240,0 230,-4 230,-10 Z" fill="#111A2E" opacity="0.95"/>
+
+    <!-- Main Drop Card Surface -->
+    <rect x="0" y="0" width="380" height="340" rx="16" fill="#111A2E" fill-opacity="0.96" stroke="#1E5EFF" stroke-opacity="0.6" stroke-width="1.5"/>
+
+    <!-- Header / Track Details -->
+    <g transform="translate(18, 18)">
+      <!-- Album Art Squircle -->
+      <rect x="0" y="0" width="68" height="68" rx="12" fill="#16213A" stroke="#1E2A44" stroke-width="1"/>
+      <!-- Album Vinyl Icon -->
+      <circle cx="34" cy="34" r="24" fill="#0B1220"/>
+      <circle cx="34" cy="34" r="8" fill="#1E5EFF"/>
+
+      <!-- Track Info -->
+      <text x="82" y="24" font-size="14.5" font-weight="700" fill="#E6ECF8">Midnight Resonance</text>
+      <text x="82" y="44" font-size="12.5" font-weight="500" fill="#7C8AA5">Staka Soundworks — OST</text>
+
+      <!-- Seek Bar -->
+      <g transform="translate(0, 84)">
+        <rect x="0" y="0" width="344" height="5" rx="2.5" fill="#1E2A44"/>
+        <rect x="0" y="0" width="140" height="5" rx="2.5" fill="#1E5EFF"/>
+        <circle cx="140" cy="2.5" r="5" fill="#3B7BFF"/>
+        <text x="0" y="20" font-size="11" fill="#7C8AA5">01:42</text>
+        <text x="344" y="20" font-size="11" fill="#7C8AA5" text-anchor="end">03:58</text>
+      </g>
+
+      <!-- Transport Controls -->
+      <g transform="translate(90, 114)">
+        <text x="0" y="16" font-size="18" fill="#7C8AA5">⏮</text>
+        <circle cx="50" cy="12" r="16" fill="#1E5EFF"/>
+        <text x="50" y="17" font-size="14" fill="#FFFFFF" text-anchor="middle">⏸</text>
+        <text x="100" y="16" font-size="18" fill="#7C8AA5">⏭</text>
+      </g>
+    </g>
+
+    <!-- Synchronized Lyrics Scroll Container -->
+    <g transform="translate(18, 185)">
+      <rect x="0" y="0" width="344" height="135" rx="10" fill="#0B1220" fill-opacity="0.6" stroke="#1E2A44" stroke-width="1"/>
+
+      <!-- Lyric lines -->
+      <text x="16" y="28" font-size="12.5" fill="#7C8AA5" opacity="0.5">[01:30] Floating above the silent grid</text>
+
+      <!-- Active Lyric Highlight with Glowing Capsule -->
+      <rect x="8" y="40" width="328" height="28" rx="6" fill="#1E5EFF" fill-opacity="0.18" stroke="#3B7BFF" stroke-opacity="0.4" stroke-width="1"/>
+      <text x="16" y="59" font-size="13.5" font-weight="700" fill="#609AFF">[01:42] Neon lights reflect in rain</text>
+
+      <text x="16" y="92" font-size="12.5" fill="#7C8AA5">[01:54] Signals crossing through the band</text>
+      <text x="16" y="118" font-size="12.5" fill="#7C8AA5" opacity="0.5">[02:08] A unified horizon waits</text>
+    </g>
+  </g>
+</svg>

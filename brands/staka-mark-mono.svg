@@ -1,5 +1,5 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="Staka">
-  <rect x="10" y="8" width="36" height="12" rx="3" fill="currentColor"/>
-  <rect x="18" y="26" width="36" height="12" rx="3" fill="currentColor" opacity="0.72"/>
-  <rect x="10" y="44" width="36" height="12" rx="3" fill="currentColor" opacity="0.92"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none" role="img" aria-label="Staka Monochrome">
+  <rect x="10" y="8" width="36" height="12" rx="3.5" fill="currentColor"/>
+  <rect x="18" y="26" width="36" height="12" rx="3.5" fill="currentColor"/>
+  <rect x="10" y="44" width="36" height="12" rx="3.5" fill="currentColor"/>
 </svg>

@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2560 1440" width="2560" height="1440" fill="none">
+  <defs>
+    <linearGradient id="lock-bg" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#050811"/>
+      <stop offset="50%" stop-color="#080F1E"/>
+      <stop offset="100%" stop-color="#03050A"/>
+    </linearGradient>
+    <radialGradient id="lock-radial" cx="50%" cy="45%" r="55%">
+      <stop offset="0%" stop-color="#1E5EFF" stop-opacity="0.25"/>
+      <stop offset="40%" stop-color="#0B2F8A" stop-opacity="0.10"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="lock-aura" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="24" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+  <rect width="2560" height="1440" fill="url(#lock-bg)"/>
+  <rect width="2560" height="1440" fill="url(#lock-radial)"/>
+
+  <!-- Centered Staka Symbol + Lock Aura -->
+  <g filter="url(#lock-aura)" transform="translate(1100, 474.79999999999995) scale(0.8)">
+    <rect x="0" y="0" width="360" height="90" rx="24" fill="#3B7BFF" fill-opacity="0.8"/>
+    <rect x="90" y="115" width="360" height="90" rx="24" fill="#609AFF" fill-opacity="0.9"/>
+    <rect x="0" y="230" width="360" height="90" rx="24" fill="#1E5EFF" fill-opacity="0.75"/>
+  </g>
+</svg>
