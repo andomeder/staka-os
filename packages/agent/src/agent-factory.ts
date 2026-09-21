@@ -11,6 +11,8 @@ import { createSessionSearchTool } from "./tools/session-search.ts";
 import { createCompositorTools } from "./tools/compositor.ts";
 import { createBrowserTools } from "./tools/browser.ts";
 import { createAtspiTools } from "./tools/atspi.ts";
+import { createFsTools } from "./tools/fs.ts";
+import { createDeliverTools } from "./tools/deliver.ts";
 import { buildMemoryPromptBlock } from "./memory/personal.ts";
 import { buildSkillsIndex, type SourcedSkill } from "./skills/loader.ts";
 
@@ -26,6 +28,15 @@ export type CreateAgentDeps = {
 };
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+
+/// Parses STAKA_FS_ALLOWLIST ("~/reports:/srv/share,~/docs").
+export function parseAllowlist(raw?: string): string[] {
+  if (!raw) return [];
+  return raw
+    .split(/[:,]/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
 
 function resolveModel(env: Env): Model | undefined {
   const provider = env.STAKA_MODEL_PROVIDER ?? "anthropic";
@@ -105,6 +116,17 @@ export function createAgent(deps: CreateAgentDeps): Agent {
     chromiumBin: deps.env.STAKA_CHROMIUM_BIN,
   });
   const atspiTools = createAtspiTools();
+  const fsTools = createFsTools({
+    allowlist: parseAllowlist(deps.env.STAKA_FS_ALLOWLIST),
+    orgUrl: deps.orgUrl,
+    token: deps.token,
+    fetch: deps.fetch,
+  });
+  const deliverTools = createDeliverTools({
+    orgUrl: deps.orgUrl,
+    token: deps.token,
+    fetch: deps.fetch,
+  });
   const tools = [
     ...orgTools,
     ...skillsTools,
@@ -114,6 +136,8 @@ export function createAgent(deps: CreateAgentDeps): Agent {
     ...compositorTools,
     ...browserTools,
     ...atspiTools,
+    ...fsTools,
+    ...deliverTools,
   ];
   return new Agent({
     initialState: {

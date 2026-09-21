@@ -7,7 +7,7 @@ import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { Db } from "../db/client.ts";
 import { appMachineColumns } from "../db/machine-columns.ts";
-import { machines, usageLogs } from "../db/schema.ts";
+import { machines, usageLogs, users, deliveries } from "../db/schema.ts";
 import {
   createActivationCode,
   listActivationCodes,
@@ -42,6 +42,7 @@ import {
 } from "../middleware/admin-auth.ts";
 import {
   CodesPage,
+  DeliveriesPage,
   LoginPage,
   MachineDetailPage,
   MachinesPage,
@@ -608,6 +609,45 @@ export function dashboardRoutes(deps: DashboardDeps) {
       deps.flashes.set(auth.jti, { message: "revoked" });
     }
     return c.redirect("/admin/codes");
+  });
+
+  authed.get("/deliveries", async (c) => {
+    const auth = c.get("adminAuth");
+    const csrf = mintCsrf(c);
+    const flash =
+      deps.flashes.take(auth.jti)?.message ??
+      sanitizeFlash(c.req.query("flash"));
+    const rows = await deps.dbApp
+      .select({
+        id: deliveries.id,
+        summary: deliveries.summary,
+        artifactRef: deliveries.artifactRef,
+        createdAt: deliveries.createdAt,
+        machineHostname: machines.hostname,
+        toEmployeeId: users.employeeId,
+        toDisplayName: users.displayName,
+      })
+      .from(deliveries)
+      .innerJoin(machines, eq(deliveries.machineId, machines.id))
+      .innerJoin(users, eq(deliveries.toUserId, users.id))
+      .orderBy(desc(deliveries.createdAt))
+      .limit(100);
+
+    return c.html(
+      <DeliveriesPage
+        employeeId={auth.employeeId}
+        csrf={csrf}
+        {...(flash ? { flash } : {})}
+        deliveries={rows.map((d) => ({
+          id: d.id,
+          summary: d.summary,
+          artifactRef: d.artifactRef,
+          fromHostname: d.machineHostname,
+          toUserLabel: userLabel(d.toEmployeeId, d.toDisplayName),
+          createdAt: d.createdAt.toISOString(),
+        }))}
+      />,
+    );
   });
 
   authed.get("/reports/stale", async (c) => {

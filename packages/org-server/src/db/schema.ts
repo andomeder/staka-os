@@ -39,6 +39,11 @@ export const usageEventTypeEnum = pgEnum("usage_event_type", [
   "admin_read_pii",
   "user_authenticated_self_provision",
   "config_pull",
+  "agent_action",
+  "agent_error",
+  "skill_invoked",
+  "agent_file_read",
+  "delivery_created",
 ]);
 
 const ts = (name: string) =>
@@ -161,6 +166,29 @@ export const adminAuditLog = pgTable("admin_audit_log", {
   createdAt: ts("created_at").notNull().defaultNow(),
 });
 
+export const deliveries = pgTable(
+  "deliveries",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    machineId: uuid("machine_id")
+      .notNull()
+      .references(() => machines.id),
+    toUserId: uuid("to_user_id")
+      .notNull()
+      .references(() => users.id),
+    summary: text("summary").notNull(),
+    artifactRef: text("artifact_ref"),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("deliveries_created_idx").on(t.createdAt),
+    index("deliveries_machine_idx").on(t.machineId),
+    index("deliveries_to_user_idx").on(t.toUserId),
+  ],
+);
+
 export type User = typeof users.$inferSelect;
 export type NewUser = typeof users.$inferInsert;
 export type Machine = typeof machines.$inferSelect;
@@ -168,4 +196,5 @@ export type NewMachine = typeof machines.$inferInsert;
 export type ActivationCode = typeof activationCodes.$inferSelect;
 export type NewActivationCode = typeof activationCodes.$inferInsert;
 export type UsageLog = typeof usageLogs.$inferSelect;
+export type Delivery = typeof deliveries.$inferSelect;
 export type AdminAuditLog = typeof adminAuditLog.$inferSelect;
