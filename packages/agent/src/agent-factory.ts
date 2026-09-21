@@ -9,6 +9,7 @@ import { createSkillManageTool } from "./tools/skill-manage.ts";
 import { createMemoryTool } from "./tools/memory.ts";
 import { createSessionSearchTool } from "./tools/session-search.ts";
 import { createCompositorTools } from "./tools/compositor.ts";
+import { createGuideTools } from "./tools/guide.ts";
 import { buildMemoryPromptBlock } from "./memory/personal.ts";
 import { buildSkillsIndex, type SourcedSkill } from "./skills/loader.ts";
 
@@ -63,6 +64,7 @@ function buildSystemPrompt(orgName?: string | null, skills?: SourcedSkill[]): st
     "Use the org tools to answer questions about the current machine and the org directory.",
     "Prefer org_whoami for identity questions and org_users_search to find colleagues.",
     "Use org_log_event to record notable agent actions.",
+    "To point at something on the user's screen, use guide_highlight or guide_sequence; the overlay never interferes with their input.",
   ];
 
   const memoryBlock = buildMemoryPromptBlock();
@@ -95,6 +97,7 @@ export function createAgent(deps: CreateAgentDeps): Agent {
   const memoryTool = createMemoryTool();
   const sessionSearchTool = createSessionSearchTool();
   const compositorTools = createCompositorTools();
+  const guideTools = createGuideTools();
   const tools = [
     ...orgTools,
     ...skillsTools,
@@ -102,6 +105,7 @@ export function createAgent(deps: CreateAgentDeps): Agent {
     memoryTool,
     sessionSearchTool,
     ...compositorTools,
+    ...guideTools,
   ];
   return new Agent({
     initialState: {
