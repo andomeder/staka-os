@@ -118,9 +118,35 @@ fix_token_permissions() {
 
 # $HOME differs between root and user contexts; pin it to the target user.
 HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+install_model_env() {
+  # Demo mode: /opt/staka/demo.env carries the model environment for the
+  # agent (STAKA_MODEL_* lines). Present only in demo ISO builds.
+  if [[ ! -f /opt/staka/demo.env ]]; then
+    return 0
+  fi
+  local dropin_dir="$HOME/.config/systemd/user/staka-agent.service.d"
+  mkdir -p "$dropin_dir"
+  { echo "[Service]"; sed 's/^/Environment=/' /opt/staka/demo.env; } > "$dropin_dir/staka-model.conf"
+  if [[ $(id -u) == "0" ]]; then
+    chown -R "$(id -u "$TARGET_USER"):$(id -g "$TARGET_USER")" "$HOME/.config/systemd"
+  fi
+  echo "installed model environment from demo.env"
+}
+
+mask_idle_lock() {
+  # Demo mode: keep the session awake (hypridle would lock mid-presentation).
+  if [[ ! -f /opt/staka/demo.env ]]; then
+    return 0
+  fi
+  ln -sf /dev/null "$HOME/.config/systemd/user/hypridle.service"
+  echo "masked hypridle for demo"
+}
+
 install_agent_binary
 install_agent_unit
 install_shell
 install_skills
 enable_agent
 fix_token_permissions
+install_model_env
+mask_idle_lock

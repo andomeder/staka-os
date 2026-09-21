@@ -1,7 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "../../services/AgentClient.qml"
+import "../../services"
 
 // Bar entry point for the assistant.
 // Tapping it toggles the AI panel via shell IPC (bound to Super+A);

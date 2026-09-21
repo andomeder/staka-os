@@ -6,7 +6,7 @@ import Quickshell.Wayland
 import Quickshell.Widgets
 import qs.Commons
 import qs.Ui
-import "../../services/AgentClient.qml"
+import "../../services"
 
 // System-wide assistant panel. Opens as a right-docked layer-shell overlay,
 // streams chat from the local agent daemon over SSE, and renders tool calls
