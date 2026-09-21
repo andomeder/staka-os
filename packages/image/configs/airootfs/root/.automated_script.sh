@@ -36,13 +36,16 @@ install_arch() {
 }
 
 install_omarchy() {
+  gum style --foreground 3 --padding "1 0 1 $PADDING_LEFT" "Configuring desktop (this runs silently for a few minutes)..."
   chroot_bash -lc "sudo pacman -S --noconfirm --needed gum" >/dev/null
   chroot_bash -lc "source /home/$OMARCHY_USER/.local/share/omarchy/install.sh"
 
   configure_login_for_unencrypted_install
+  gum style --foreground 2 --padding "0 0 1 $PADDING_LEFT" "Desktop configured."
 }
 
 install_staka_agent() {
+  gum style --foreground 3 --padding "1 0 1 $PADDING_LEFT" "Installing Staka agent and shell..."
   # Stage ISO agent artifacts onto the target root so the chroot setup
   # script can install the binary, unit, shell, and skills.
   if [[ -d /opt/staka ]]; then
