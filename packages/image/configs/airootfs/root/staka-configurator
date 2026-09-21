@@ -7,6 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export OMARCHY_PATH="${OMARCHY_PATH:-/root/omarchy}"
 export OMARCHY_INSTALL="${OMARCHY_INSTALL:-/root/omarchy/install}"
 export OMARCHY_INSTALL_LOG_FILE="${OMARCHY_INSTALL_LOG_FILE:-/var/log/omarchy-install.log}"
+touch "$OMARCHY_INSTALL_LOG_FILE" 2>/dev/null || true
 
 if [[ -f "$SCRIPT_DIR/helpers/all.sh" ]]; then
   # shellcheck source=/dev/null
@@ -433,8 +434,8 @@ if [[ $provision_flow == "self" ]]; then
 fi
 
 set +e
-"$SCRIPT_DIR/staka-activate.sh" "${activate_args[@]}"
-activate_rc=$?
+"$SCRIPT_DIR/staka-activate.sh" "${activate_args[@]}" 2>&1 | tee -a "$OMARCHY_INSTALL_LOG_FILE"
+activate_rc=${PIPESTATUS[0]}
 set -e
 unset STAKA_SELF_PASSWORD
 self_password=""
