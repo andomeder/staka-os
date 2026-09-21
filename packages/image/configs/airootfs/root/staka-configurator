@@ -172,7 +172,7 @@ user_form() {
   step "Let's setup the local user account..."
 
   while true; do
-    username=$(gum input --placeholder "Alphanumeric without spaces (like dhh)" --prompt.foreground="#1E5EFF" --prompt "Username> ") || abort
+    username=$(gum input --placeholder "Alphanumeric without spaces (like demo)" --prompt.foreground="#1E5EFF" --prompt "Username> ") || abort
 
     if [[ "$username" =~ ^[a-z_][a-z0-9_-]*[$]?$ ]]; then
       break
