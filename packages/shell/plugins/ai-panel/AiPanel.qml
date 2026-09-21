@@ -258,6 +258,15 @@ Item {
                   spacing: 2
 
                   Text {
+                    visible: model.kind !== "tool"
+                    text: model.kind === "user" ? "You" : model.kind === "error" ? "Error" : "Staka AI"
+                    color: model.kind === "user" ? Qt.darker(root.foreground, 1.4) : root.border
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    font.bold: true
+                  }
+
+                  Text {
                     visible: model.kind === "tool"
                     text: "\u2699 " + model.toolName
                     color: Qt.darker(root.foreground, 1.5)
@@ -272,7 +281,7 @@ Item {
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
                     wrapMode: Text.Wrap
-                    textFormat: Text.PlainText
+                    textFormat: model.kind === "error" ? Text.PlainText : Text.MarkdownText
                   }
                 }
               }
