@@ -1,18 +1,20 @@
 # Packages pulled into the offline ISO mirror for archinstall + activation.
-# Pin archinstall so the Python 3.14 installer.py patches stay valid.
+# The pin on archinstall was dropped: the rolling repo no longer carries
+# 4.4-1, and the installer patches tolerate current versions.
 alsa-firmware
 amd-ucode
-archinstall=4.4-1
+archinstall
 base
 base-devel
 curl
 efibootmgr
 intel-ucode
-linux-firmware
-linux
 limine
+linux
+linux-firmware
 omarchy-keyring
 openssh
 pipewire
+quickshell
 snapper
 sof-firmware
