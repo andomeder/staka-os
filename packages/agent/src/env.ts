@@ -14,6 +14,12 @@ const EnvSchema = z.object({
   STAKA_MODEL_MAX_TOKENS: z.coerce.number().optional(),
   STAKA_HEARTBEAT_INTERVAL_MS: z.coerce.number().default(60_000),
   STAKA_CONFIG_REFRESH_MS: z.coerce.number().default(300_000),
+  /// Colon- or comma-separated directories fs_read_file may read.
+  STAKA_FS_ALLOWLIST: z.string().optional(),
+  /// Profile dir for the Staka-managed Chromium.
+  STAKA_BROWSER_PROFILE_DIR: z.string().optional(),
+  /// Chromium binary for the Staka-managed browser.
+  STAKA_CHROMIUM_BIN: z.string().optional(),
 });
 
 export type Env = z.infer<typeof EnvSchema>;
