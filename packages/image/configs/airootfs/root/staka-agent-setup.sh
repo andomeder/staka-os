@@ -11,12 +11,28 @@ AGENT_UNIT_SRC="/opt/staka/agent/staka-agent.service"
 SHELL_SRC="/opt/staka/shell"
 SKILLS_SRC="/opt/staka/skills"
 
+# Support running as root (no user sudo required in the chroot) or as the
+# install user. STAKA_SETUP_USER must name the desktop user either way.
+TARGET_USER="${STAKA_SETUP_USER:-${SUDO_USER:-}}"
+if [[ -z $TARGET_USER ]]; then
+  echo "STAKA_SETUP_USER not set; cannot determine target user" >&2
+  exit 1
+fi
+TARGET_UID=$(id -u "$TARGET_USER")
+if [[ $(id -u) == "0" ]]; then
+  SUDO=""
+  INSTALL_USER_FLAGS=(-o "$TARGET_UID" -g "$(id -g "$TARGET_USER")")
+else
+  SUDO="sudo"
+  INSTALL_USER_FLAGS=()
+fi
+
 install_agent_binary() {
   if [[ ! -f "$AGENT_BIN_SRC" ]]; then
     echo "staka-agent binary not found at $AGENT_BIN_SRC; skipping" >&2
     return 0
   fi
-  sudo install -m 755 "$AGENT_BIN_SRC" /usr/local/bin/staka-agent
+  $SUDO install "${INSTALL_USER_FLAGS[@]}" -m 755 "$AGENT_BIN_SRC" /usr/local/bin/staka-agent
   echo "installed staka-agent binary"
 }
 
@@ -25,7 +41,7 @@ install_agent_unit() {
     echo "staka-agent.service not found at $AGENT_UNIT_SRC; skipping" >&2
     return 0
   fi
-  sudo install -Dm 644 "$AGENT_UNIT_SRC" /usr/lib/systemd/user/staka-agent.service
+  $SUDO install -Dm 644 "$AGENT_UNIT_SRC" /usr/lib/systemd/user/staka-agent.service
   echo "installed staka-agent systemd user unit"
 }
 
@@ -49,6 +65,19 @@ install_shell() {
     mkdir -p "$HOME/.config/hypr/staka"
     cp "$SHELL_SRC/hyprland/staka-keybinds.conf.lua" "$HOME/.config/hypr/staka/"
   fi
+
+  # Wire the shell into the desktop: Super+A keybind (plain Hyprland syntax,
+  # works regardless of Lua config support) and shell autostart.
+  HYPRLAND_CONF="$HOME/.config/hypr/hyprland.conf"
+  if [[ -f "$HYPRLAND_CONF" ]] && ! grep -q "staka-toggle-panel" "$HYPRLAND_CONF"; then
+    {
+      echo ""
+      echo "# Staka AI panel (Super+A) + shell autostart"
+      echo "bind = SUPER, A, exec, $HOME/.local/bin/staka-toggle-panel"
+      echo "exec-once = quickshell -p $HOME/.local/share/staka/shell"
+    } >> "$HYPRLAND_CONF"
+    echo "wired staka shell into hyprland config"
+  fi
   echo "installed staka shell"
 }
 
@@ -67,9 +96,9 @@ enable_agent() {
     echo "no machine token; agent unit not enabled" >&2
     return 0
   fi
-  mkdir -p "$HOME/.config/systemd/user/default.target.wants"
+  mkdir -p "$(getent passwd "$TARGET_USER" | cut -d: -f6)/.config/systemd/user/default.target.wants"
   ln -sf /usr/lib/systemd/user/staka-agent.service \
-    "$HOME/.config/systemd/user/default.target.wants/staka-agent.service"
+    "$(getent passwd "$TARGET_USER" | cut -d: -f6)/.config/systemd/user/default.target.wants/staka-agent.service"
   echo "enabled staka-agent for next login"
 }
 
@@ -77,13 +106,18 @@ fix_token_permissions() {
   if [[ ! -f /etc/staka/machine.token ]]; then
     return 0
   fi
-  sudo chown "$(id -u):$(id -g)" /etc/staka/machine.token
+  $SUDO chown "$TARGET_UID:$(id -g "$TARGET_USER")" /etc/staka/machine.token
   if [[ -f /etc/staka/activation.json ]]; then
-    sudo chown "$(id -u):$(id -g)" /etc/staka/activation.json
+    $SUDO chown "$TARGET_UID:$(id -g "$TARGET_USER")" /etc/staka/activation.json
+  fi
+  if [[ -f /etc/staka/org-url ]]; then
+    $SUDO chown "$TARGET_UID:$(id -g "$TARGET_USER")" /etc/staka/org-url
   fi
   echo "fixed token ownership for agent access"
 }
 
+# $HOME differs between root and user contexts; pin it to the target user.
+HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
 install_agent_binary
 install_agent_unit
 install_shell
