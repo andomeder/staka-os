@@ -105,13 +105,14 @@ PASSWORD="${STAKA_SELF_PASSWORD:-}"
 discover_org_url() {
   local domain="$1"
   local txt
+  local org_url_re='^staka-org-url=(https?://[^[:space:"]]+)$'
   txt=$(dig +short +time=3 +tries=1 TXT "_staka-org.${domain}" 2>/dev/null | head -1)
   if [[ -z $txt ]]; then
     return 1
   fi
   txt="${txt#\"}"
   txt="${txt%\"}"
-  if [[ $txt =~ ^staka-org-url=(https?://[^[:space:]"]+)$ ]]; then
+  if [[ $txt =~ $org_url_re ]]; then
     printf '%s' "${BASH_REMATCH[1]}"
     return 0
   fi
