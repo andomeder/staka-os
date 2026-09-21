@@ -29,6 +29,8 @@ describe("agent factory tool registration", () => {
       "browser_type",
       "browser_screenshot",
       "atspi_read",
+      "fs_read_file",
+      "org_deliver",
       "compositor_start_app",
       "org_users_search",
     ]) {

@@ -13,6 +13,9 @@ import { authRoutes } from "./routes/auth.ts";
 import { dashboardRoutes } from "./routes/dashboard.tsx";
 import { healthRoutes, type HealthDeps } from "./routes/health.ts";
 import { configRoutes } from "./routes/config.ts";
+import { deliveriesRoutes } from "./routes/deliveries.ts";
+import { usageRoutes } from "./routes/usage.ts";
+import { usersSearchRoutes } from "./routes/users.ts";
 
 export type AppDeps = HealthDeps & {
   logger?: {
@@ -126,6 +129,30 @@ export function createApp(deps: AppDeps = {}) {
     };
     if (deps.statusCache) cfgDeps.statusCache = deps.statusCache;
     app.route("/", configRoutes(cfgDeps));
+
+    const usageDeps: Parameters<typeof usageRoutes>[0] = {
+      dbApp: deps.dbApp,
+      keyring: deps.keyring,
+      rateLimiters: deps.rateLimiters,
+    };
+    if (deps.statusCache) usageDeps.statusCache = deps.statusCache;
+    app.route("/", usageRoutes(usageDeps));
+
+    const usersDeps: Parameters<typeof usersSearchRoutes>[0] = {
+      dbApp: deps.dbApp,
+      keyring: deps.keyring,
+      rateLimiters: deps.rateLimiters,
+    };
+    if (deps.statusCache) usersDeps.statusCache = deps.statusCache;
+    app.route("/", usersSearchRoutes(usersDeps));
+
+    const deliveryDeps: Parameters<typeof deliveriesRoutes>[0] = {
+      dbApp: deps.dbApp,
+      keyring: deps.keyring,
+      rateLimiters: deps.rateLimiters,
+    };
+    if (deps.statusCache) deliveryDeps.statusCache = deps.statusCache;
+    app.route("/", deliveriesRoutes(deliveryDeps));
   }
 
   app.notFound((c) =>

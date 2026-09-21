@@ -552,3 +552,60 @@ export function StaleMachinesPage(props: {
     </Layout>
   );
 }
+
+export function DeliveriesPage(props: {
+  employeeId: string;
+  csrf: string;
+  deliveries: Array<{
+    id: string;
+    summary: string;
+    artifactRef: string | null;
+    fromHostname: string | null;
+    toUserLabel: string;
+    createdAt: string;
+  }>;
+  flash?: string;
+}) {
+  return (
+    <Layout title="Deliveries" employeeId={props.employeeId} csrf={props.csrf}>
+      <div class="card">
+        <h1>Deliveries</h1>
+        <p class="muted">
+          Artifacts and summaries agents have delivered to org members on
+          behalf of their machines.
+        </p>
+        {props.flash ? <div class="flash">{props.flash}</div> : null}
+        <table>
+          <thead>
+            <tr>
+              <th>When</th>
+              <th>To</th>
+              <th>From machine</th>
+              <th>Summary</th>
+              <th>Artifact</th>
+            </tr>
+          </thead>
+          <tbody>
+            {props.deliveries.length === 0 ? (
+              <tr>
+                <td colspan={5} class="muted">
+                  No deliveries recorded yet.
+                </td>
+              </tr>
+            ) : (
+              props.deliveries.map((d) => (
+                <tr>
+                  <td class="muted">{d.createdAt}</td>
+                  <td>{d.toUserLabel}</td>
+                  <td>{d.fromHostname ?? "unknown"}</td>
+                  <td>{d.summary}</td>
+                  <td class="mono">{d.artifactRef ?? "-"}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Layout>
+  );
+}
