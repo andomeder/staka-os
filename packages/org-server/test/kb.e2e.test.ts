@@ -296,4 +296,25 @@ describe("KB routes", () => {
       .where(eq(usageLogs.machineId, machineId));
     expect(logs.some((l) => l.eventType === "kb_read")).toBe(true);
   });
+
+  test("machine requests are rate limited per machine", async () => {
+    const { app, jwt } = await seedMachineWithJwt();
+    engine.docs.set("doc:alpha-q3", SPACE_DOCS.alpha!);
+
+    let saw429 = 0;
+    for (let i = 0; i < 61; i++) {
+      const res = await app.request("/v1/kb/search", {
+        method: "POST",
+        headers: { authorization: `Bearer ${jwt}`, "content-type": "application/json" },
+        body: JSON.stringify({ query: "Alpha Q3 reporting" }),
+      });
+      if (res.status === 429) {
+        saw429 += 1;
+        expect(res.headers.get("retry-after")).not.toBeNull();
+      } else {
+        expect(res.status).toBe(200);
+      }
+    }
+    expect(saw429).toBe(1);
+  });
 });
