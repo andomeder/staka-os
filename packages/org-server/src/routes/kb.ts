@@ -169,6 +169,47 @@ export function kbRoutes(deps: KbRoutesDeps) {
     }
   });
 
+  app.post("/v1/kb/skills", auth, async (c) => {
+    if (!deps.kb) return err(c, 503, "kb_unavailable");
+    const machineId = c.get("machineAuth").machineId;
+
+    let parsedBody: z.infer<typeof searchSchema>;
+    try {
+      parsedBody = searchSchema.parse(await c.req.json());
+    } catch {
+      return err(c, 400, "invalid_request");
+    }
+
+    try {
+      const results = await deps.kb.client.search({
+        query: parsedBody.query,
+        space: deps.kb.space,
+        limit: parsedBody.limit,
+        filters: { AND: [{ key: KB_META_DOC_TYPE, value: "skill" }] },
+      });
+      await deps.dbApp.insert(usageLogs).values({
+        machineId,
+        eventType: "kb_search",
+        payload: { kind: "skills", results: results.length },
+      });
+      return c.json({
+        skills: results.map((r) => ({
+          id: r.documentId,
+          name: r.documentId.startsWith("skill:")
+            ? r.documentId.slice("skill:".length)
+            : r.title,
+          description: r.snippet.split("\n").slice(0, 3).join(" ").slice(0, 300),
+          score: r.score,
+          source: "org",
+        })),
+      });
+    } catch (e) {
+      if (e instanceof KbEngineError) return err(c, 502, "kb_engine_error");
+      if (e instanceof KbUnavailableError) return err(c, 503, "kb_unavailable");
+      throw e;
+    }
+  });
+
   app.get("/v1/kb/documents/:documentId", auth, async (c) => {
     if (!deps.kb) return err(c, 503, "kb_unavailable");
     const machineId = c.get("machineAuth").machineId;

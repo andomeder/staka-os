@@ -4,6 +4,7 @@ import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { Model } from "@earendil-works/pi-ai";
 import type { Env } from "./env.ts";
 import { createOrgTools } from "./tools/org.ts";
+import { createKbTools } from "./tools/kb.ts";
 import { createSkillsTools } from "./tools/skills.ts";
 import { createSkillManageTool } from "./tools/skill-manage.ts";
 import { createMemoryTool } from "./tools/memory.ts";
@@ -64,6 +65,9 @@ function buildSystemPrompt(orgName?: string | null, skills?: SourcedSkill[]): st
     org,
     "Use the org tools to answer questions about the current machine and the org directory.",
     "Prefer org_whoami for identity questions and org_users_search to find colleagues.",
+    "For org documents, procedures, and policies use search_knowledge, then get_document to read a cited result in full.",
+    "To resolve who handles a topic use who_knows (it cites the evidence); fall back to org_users_search when who_knows finds nothing or the user just wants a name lookup.",
+    "Use search_skills to discover org-shared skills beyond the locally installed ones.",
     "Use org_log_event to record notable agent actions.",
     "Structured access ladder: prefer org tools (native API), then browser_* over CDP and atspi_read for structured app access.",
     "The user's display and input are never taken over: browser tools talk to the page, not the seat; headless work happens via compositor_* tools.",
@@ -105,8 +109,14 @@ export function createAgent(deps: CreateAgentDeps): Agent {
     chromiumBin: deps.env.STAKA_CHROMIUM_BIN,
   });
   const atspiTools = createAtspiTools();
+  const kbTools = createKbTools({
+    orgUrl: deps.orgUrl,
+    token: deps.token,
+    fetch: deps.fetch,
+  });
   const tools = [
     ...orgTools,
+    ...kbTools,
     ...skillsTools,
     skillManageTool,
     memoryTool,

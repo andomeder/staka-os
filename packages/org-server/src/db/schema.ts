@@ -3,6 +3,7 @@ import {
   bigint,
   bigserial,
   boolean,
+  customType,
   index,
   integer,
   jsonb,
@@ -13,6 +14,12 @@ import {
   uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
+
+const bytea = customType<{ data: Buffer; driverData: Buffer }>({
+  dataType() {
+    return "bytea";
+  },
+});
 
 export const userRoleEnum = pgEnum("user_role", ["admin", "staff"]);
 export const userStatusEnum = pgEnum("user_status", [
@@ -187,6 +194,25 @@ export const kbDocuments = pgTable(
     index("kb_documents_source_idx").on(t.source),
     index("kb_documents_deleted_at_idx").on(t.deletedAt),
   ],
+);
+
+export const skillPacks = pgTable(
+  "skill_packs",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`uuidv7()`),
+    version: integer("version").notNull(),
+    sha256: text("sha256").notNull(),
+    sizeBytes: integer("size_bytes").notNull(),
+    skillCount: integer("skill_count").notNull(),
+    content: bytea("content").notNull(),
+    uploadedBy: uuid("uploaded_by")
+      .notNull()
+      .references(() => users.id),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("skill_packs_version_uidx").on(t.version)],
 );
 
 export type User = typeof users.$inferSelect;
