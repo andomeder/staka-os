@@ -21,6 +21,7 @@ REQUIRED_FILES=(
   database_app_url
   database_admin_url
   staka_jwt_keys
+  staka_kb_engine_key
 )
 
 existing=()
@@ -109,6 +110,11 @@ write database_url "postgres://${PG_USER}:${PG_PW_ENC}@${PG_HOST}:5432/${PG_DB}"
 write database_app_url "postgres://staka_app:${APP_PW_ENC}@${PG_HOST}:5432/${PG_DB}"
 write database_admin_url "postgres://staka_admin:${ADMIN_PW_ENC}@${PG_HOST}:5432/${PG_DB}"
 write staka_jwt_keys "$JWT_JSON"
+
+# Knowledge base engine key. The engine auto-generates its own API key on
+# first boot; this placeholder is overwritten from the engine data volume
+# (see the knowledge base section in README.md).
+write staka_kb_engine_key "$(rand)"
 
 echo "Wrote secret files under $SECRETS_DIR (files mode 600; dir 0700). Values not printed."
 echo "Next: docker compose -f docker-compose.prod.yml up -d --build"
