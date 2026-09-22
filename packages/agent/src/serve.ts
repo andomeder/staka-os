@@ -3,7 +3,7 @@ import type { Env } from "./env.ts";
 import { bootstrap, startHeartbeat } from "./bootstrap.ts";
 import { pullConfig } from "./config-pull.ts";
 import { chatRoutes } from "./api/routes.ts";
-import { createAgent } from "./agent-factory.ts";
+import { createAgent, resolveModel } from "./agent-factory.ts";
 import type { StreamFn } from "@earendil-works/pi-agent-core";
 import { loadSkills, type SourcedSkill } from "./skills/loader.ts";
 import { ensureOrgSkillSymlink } from "./skills/symlink.ts";
@@ -41,7 +41,7 @@ export function createApp(state: AgentState, chat?: ChatConfig, skills?: Sourced
       status: state.status,
       machine_id: state.machineId,
       org_name: state.orgName,
-      model: null,
+      model: chat ? resolveModel(chat.env)?.id ?? null : null,
       skills_count: skills?.length ?? 0,
       memory_entries: memoryEntries,
       error: state.error,
