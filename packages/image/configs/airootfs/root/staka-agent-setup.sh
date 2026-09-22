@@ -66,6 +66,14 @@ install_shell() {
     cp "$SHELL_SRC/hyprland/staka-keybinds.conf.lua" "$HOME/.config/hypr/staka/"
   fi
 
+  # Shell configuration: band layout with the AI panel button.
+  if [[ -d /opt/staka/config/staka ]]; then
+    mkdir -p "$HOME/.local/share/staka/config"
+    rm -rf "$HOME/.local/share/staka/config/staka"
+    cp -r /opt/staka/config/staka "$HOME/.local/share/staka/config/"
+    echo "installed staka shell config"
+  fi
+
   # Wire the shell into the desktop: Super+A keybind (plain Hyprland syntax,
   # works regardless of Lua config support) and shell autostart.
   HYPRLAND_CONF="$HOME/.config/hypr/hyprland.conf"
