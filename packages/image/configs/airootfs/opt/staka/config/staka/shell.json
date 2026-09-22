@@ -12,19 +12,38 @@
     "inactiveBorder": "rgba(1E2A44aa)",
     "top": {
       "left": [
-        { "id": "staka.menu" },
-        { "id": "staka.ai-panel" },
-        { "id": "staka.workspaces" },
-        { "id": "staka.inline-lyrics" }
+        {
+          "id": "staka.menu"
+        },
+        {
+          "id": "staka.ai-panel"
+        },
+        {
+          "id": "staka.workspaces"
+        },
+        {
+          "id": "staka.inline-lyrics"
+        }
       ],
       "center": [
-        { "id": "staka.clock", "format": "dddd HH:mm" },
-        { "id": "staka.weather" }
+        {
+          "id": "staka.clock",
+          "format": "dddd HH:mm"
+        },
+        {
+          "id": "staka.weather"
+        }
       ],
       "right": [
-        { "id": "staka.hw-monitor" },
-        { "id": "staka.tray" },
-        { "id": "staka.audio" }
+        {
+          "id": "staka.hw-monitor"
+        },
+        {
+          "id": "staka.tray"
+        },
+        {
+          "id": "staka.audio"
+        }
       ]
     },
     "left": {
@@ -44,19 +63,38 @@
     "centerAnchor": "staka.clock",
     "layout": {
       "left": [
-        { "id": "staka.menu" },
-        { "id": "staka.ai-panel" },
-        { "id": "staka.workspaces" },
-        { "id": "staka.inline-lyrics" }
+        {
+          "id": "staka.menu"
+        },
+        {
+          "id": "staka.ai-panel"
+        },
+        {
+          "id": "staka.workspaces"
+        },
+        {
+          "id": "staka.inline-lyrics"
+        }
       ],
       "center": [
-        { "id": "staka.clock", "format": "dddd HH:mm" },
-        { "id": "staka.weather" }
+        {
+          "id": "staka.clock",
+          "format": "dddd HH:mm"
+        },
+        {
+          "id": "staka.weather"
+        }
       ],
       "right": [
-        { "id": "staka.hw-monitor" },
-        { "id": "staka.tray" },
-        { "id": "staka.audio" }
+        {
+          "id": "staka.hw-monitor"
+        },
+        {
+          "id": "staka.tray"
+        },
+        {
+          "id": "staka.audio"
+        }
       ]
     }
   },
@@ -64,5 +102,7 @@
     "screensaver": 150,
     "lock": 300
   },
-  "plugins": []
+  "plugins": [
+    "staka.background"
+  ]
 }

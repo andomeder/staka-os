@@ -74,10 +74,28 @@ install_shell() {
     echo "installed staka shell config"
   fi
 
-  # Wire the shell into the desktop: Super+A keybind (plain Hyprland syntax,
-  # works regardless of Lua config support) and shell autostart.
+  # Wire the shell into the desktop: Super+A keybind and shell autostart.
+  # Current Omarchy (Hyprland 0.56+) uses a Lua entrypoint and never reads
+  # hyprland.conf, so the Lua file gets Lua syntax; plain conf stays for
+  # older images.
+  HYPRLAND_LUA="$HOME/.config/hypr/hyprland.lua"
   HYPRLAND_CONF="$HOME/.config/hypr/hyprland.conf"
-  if [[ -f "$HYPRLAND_CONF" ]] && ! grep -q "staka-toggle-panel" "$HYPRLAND_CONF"; then
+  if [[ -f "$HYPRLAND_LUA" ]]; then
+    if ! grep -q "staka-toggle-panel" "$HYPRLAND_LUA"; then
+      cat >> "$HYPRLAND_LUA" <<EOF
+
+-- Staka AI panel (Super+A) + shell autostart
+hl.env("STAKA_PATH", "$HOME/.local/share/staka")
+hl.env("STAKA_SHELL_PATH", "$HOME/.local/share/staka")
+hl.on("hyprland.start", function()
+  hl.exec_cmd("quickshell -p $HOME/.local/share/staka/shell")
+  hl.exec_cmd("sleep 2 && $HOME/.local/bin/staka-band apply")
+end)
+hyprland.bind("SUPER", "A", "exec", "$HOME/.local/bin/staka-toggle-panel")
+EOF
+    fi
+    echo "wired staka shell into hyprland lua config"
+  elif [[ -f "$HYPRLAND_CONF" ]] && ! grep -q "staka-toggle-panel" "$HYPRLAND_CONF"; then
     {
       echo ""
       echo "# Staka AI panel (Super+A) + shell autostart"
@@ -87,6 +105,16 @@ install_shell() {
       echo "exec-once = quickshell -p $HOME/.local/share/staka/shell"
     } >> "$HYPRLAND_CONF"
     echo "wired staka shell into hyprland config"
+  fi
+
+  # Root-owned copies lock the user out of updating the tree; this script is
+  # re-run in chroots where every write above happens as root.
+  if [[ $(id -u) == "0" ]]; then
+    USER_GID="$(id -g "$TARGET_USER")"
+    chown -R "$TARGET_UID:$USER_GID" "$HOME/.local/share/staka"
+    for f in "$HYPRLAND_LUA" "$HYPRLAND_CONF" "$HOME/.config/hypr/staka" "$HOME/.local/bin/staka-shell" "$HOME/.local/bin/staka-toggle-panel" "$HOME/.agents/skills/staka"; do
+      [[ -e $f ]] && chown -R "$TARGET_UID:$USER_GID" "$f"
+    done
   fi
   echo "installed staka shell"
 }
@@ -152,11 +180,32 @@ mask_idle_lock() {
   echo "masked hypridle for demo"
 }
 
+apply_demo_org_url() {
+  # Demo builds reach the host org server through the QEMU user-net gateway.
+  # An org URL recorded on another network silently degrades the agent to a
+  # state where /chat answers 404, so demo mode pins it explicitly.
+  if [[ ! -f /opt/staka/demo.env ]]; then
+    return 0
+  fi
+  local url
+  url=$(grep -E '^STAKA_DEMO_ORG_URL=' /opt/staka/demo.env | head -1 | cut -d= -f2-)
+  if [[ -z $url ]]; then
+    url="http://10.0.2.2:8080"
+  fi
+  if [[ -f /etc/staka/org-url ]] && grep -qxF "$url" /etc/staka/org-url; then
+    return 0
+  fi
+  printf '%s' "$url" | $SUDO tee /etc/staka/org-url >/dev/null
+  $SUDO chown "$TARGET_UID:$(id -g "$TARGET_USER")" /etc/staka/org-url
+  echo "wrote demo org url $url"
+}
+
 install_agent_binary
 install_agent_unit
 install_shell
 install_skills
 enable_agent
 fix_token_permissions
+apply_demo_org_url
 install_model_env
 mask_idle_lock
