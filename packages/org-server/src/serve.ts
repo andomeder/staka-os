@@ -8,6 +8,7 @@ import { AdminSessionStore } from "./lib/admin-session.ts";
 import { createCsrfSigner, csrfSecretFromJwtKeys } from "./lib/csrf.ts";
 import { loadKeyring } from "./lib/jwt.ts";
 import { createLogger } from "./lib/logger.ts";
+import { kbConfigFromEnv } from "./lib/kb.ts";
 import { createActivationRateLimiters } from "./lib/rate-limit.ts";
 
 export async function serve(
@@ -84,6 +85,8 @@ export async function serve(
   if (keyring && pools) {
     appDeps.rateLimiters = createActivationRateLimiters();
   }
+  const kb = kbConfigFromEnv(env);
+  if (kb) appDeps.kb = kb;
   const app = createApp(appDeps);
 
   const server = Bun.serve({

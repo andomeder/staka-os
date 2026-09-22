@@ -1,0 +1,30 @@
+[
+  {
+    "query": "who handles Q3 spreadsheet reports and where is the procedure?",
+    "expect_doc_id": "q3-reporting-procedure",
+    "expect_profile": "EMP-0104",
+    "expect_skill": "q3-report-prep"
+  },
+  {
+    "query": "how do I connect to the VPN from a new workstation?",
+    "expect_doc_id": "vpn-setup"
+  },
+  {
+    "query": "what is the daily meal allowance on a business trip?",
+    "expect_doc_id": "expense-claim-policy"
+  },
+  {
+    "query": "who maintains the VPN gateway and issues config files?",
+    "expect_doc_id": "vpn-setup",
+    "expect_profile": "EMP-0233"
+  },
+  {
+    "query": "how many days in advance must annual leave be applied for?",
+    "expect_doc_id": "leave-procedure"
+  },
+  {
+    "query": "where do I register a vehicle for parking?",
+    "expect_doc_id": "orgb-facilities",
+    "org": "org_b"
+  }
+]

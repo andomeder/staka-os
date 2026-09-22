@@ -6,6 +6,7 @@ import type { CsrfSigner } from "./lib/csrf.ts";
 import type { JwtKeyring } from "./lib/jwt.ts";
 import { MachineStatusCache } from "./lib/machine-status-cache.ts";
 import type { ActivationRateLimiters } from "./lib/rate-limit.ts";
+import type { KbConfig } from "./lib/kb.ts";
 import { requestId } from "./middleware/request-id.ts";
 import { activateRoutes } from "./routes/activate.ts";
 import { adminRoutes } from "./routes/admin.ts";
@@ -13,6 +14,7 @@ import { authRoutes } from "./routes/auth.ts";
 import { dashboardRoutes } from "./routes/dashboard.tsx";
 import { healthRoutes, type HealthDeps } from "./routes/health.ts";
 import { configRoutes } from "./routes/config.ts";
+import { kbRoutes } from "./routes/kb.ts";
 
 export type AppDeps = HealthDeps & {
   logger?: {
@@ -31,6 +33,7 @@ export type AppDeps = HealthDeps & {
   autoApproveActorId?: string;
   trustProxy?: boolean;
   secureCookies?: boolean;
+  kb?: KbConfig;
 };
 
 export function createApp(deps: AppDeps = {}) {
@@ -126,6 +129,16 @@ export function createApp(deps: AppDeps = {}) {
     };
     if (deps.statusCache) cfgDeps.statusCache = deps.statusCache;
     app.route("/", configRoutes(cfgDeps));
+  }
+
+  if (deps.dbApp && deps.keyring) {
+    const kbDeps: Parameters<typeof kbRoutes>[0] = {
+      dbApp: deps.dbApp,
+      keyring: deps.keyring,
+    };
+    if (deps.statusCache) kbDeps.statusCache = deps.statusCache;
+    if (deps.kb) kbDeps.kb = deps.kb;
+    app.route("/", kbRoutes(kbDeps));
   }
 
   app.notFound((c) =>

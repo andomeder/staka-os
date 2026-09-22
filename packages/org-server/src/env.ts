@@ -27,6 +27,12 @@ const EnvSchema = z
     STAKA_MIGRATIONS_DIR: z.string().min(1).optional(),
     TRUST_PROXY: boolish.default(false),
     STAKA_ORG_URL: z.string().url().optional(),
+    STAKA_KB_ENGINE_URL: z.string().url().optional(),
+    STAKA_KB_ENGINE_KEY: z.string().optional(),
+    STAKA_KB_SPACE: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9_-]{1,62}$/)
+      .optional(),
     LOG_LEVEL: z
       .enum(["fatal", "error", "warn", "info", "debug", "trace"])
       .default("info"),
@@ -57,6 +63,10 @@ const KNOWN_KEYS = [
   "STAKA_ALLOW_SINGLE_DB_ROLE",
   "STAKA_MIGRATIONS_DIR",
   "TRUST_PROXY",
+  "STAKA_ORG_URL",
+  "STAKA_KB_ENGINE_URL",
+  "STAKA_KB_ENGINE_KEY",
+  "STAKA_KB_SPACE",
   "LOG_LEVEL",
 ] as const;
 
