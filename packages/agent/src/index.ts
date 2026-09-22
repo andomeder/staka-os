@@ -2,6 +2,7 @@ import { loadEnv } from "./env.ts";
 import { serve } from "./serve.ts";
 import { bootstrap } from "./bootstrap.ts";
 import { createAgent } from "./agent-factory.ts";
+import { resolveModelApiKey } from "./keyring.ts";
 
 const command = process.argv[2] ?? "serve";
 
@@ -19,7 +20,9 @@ switch (command) {
       process.exit(2);
     }
     const boot = await bootstrap(env);
-    const agent = createAgent({ env, orgUrl: boot.orgUrl, token: boot.token });
+    const modelKey = await resolveModelApiKey(env);
+    if (modelKey.source !== "keyring") console.log(`keyring: ${modelKey.source}`);
+    const agent = createAgent({ env, orgUrl: boot.orgUrl, token: boot.token, apiKey: modelKey.key });
     agent.subscribe((event) => {
       if (event.type === "message_update" && event.assistantMessageEvent.type === "text_delta") {
         process.stdout.write(event.assistantMessageEvent.delta);
