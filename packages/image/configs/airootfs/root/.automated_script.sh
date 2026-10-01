@@ -64,6 +64,27 @@ install_staka_agent() {
   rm -f /mnt/root/staka-agent-setup.sh
 }
 
+install_staka_sddm_theme() {
+  # Replace the Omarchy login screen with the Staka theme so the greeter
+  # shown at boot and after logout carries the same branding as Plymouth.
+  # The ISO owns the theme files; SDDM config lives in /etc/sddm.conf.d.
+  if [[ ! -d /usr/share/sddm/themes/staka ]]; then
+    echo "staka SDDM theme missing from ISO; keeping Omarchy theme" >&2
+    return 0
+  fi
+
+  gum style --foreground 3 --padding "1 0 1 $PADDING_LEFT" "Installing Staka login theme..."
+  rm -rf /mnt/usr/share/sddm/themes/staka
+  cp -r /usr/share/sddm/themes/staka /mnt/usr/share/sddm/themes/staka
+
+  mkdir -p /mnt/etc/sddm.conf.d
+  cat >/mnt/etc/sddm.conf.d/99-staka-theme.conf <<EOF
+[Theme]
+Current=staka
+EOF
+  echo "installed staka SDDM theme"
+}
+
 # Set Tokyo Night color scheme for the terminal
 set_tokyo_night_colors() {
   if [[ $(tty) == "/dev/tty"* ]]; then
@@ -318,6 +339,7 @@ if [[ $(tty) == "/dev/tty1" ]]; then
   install_arch
   install_omarchy
   install_staka_agent
+  install_staka_sddm_theme
 
   # Reboot if requested by installer (after agent install so the
   # agent setup is never skipped by an early reboot)
