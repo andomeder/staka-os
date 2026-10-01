@@ -2,9 +2,12 @@ import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentEvent as ProtocolEvent } from "@staka/protocol";
+import type { AgentMetrics } from "../metrics.ts";
+import { agentMetrics } from "../metrics.ts";
 
 export type ChatDeps = {
   makeAgent: () => Agent;
+  metrics?: AgentMetrics;
 };
 
 function summarizeResult(result: unknown): string {
@@ -25,6 +28,7 @@ function summarizeResult(result: unknown): string {
 
 export function chatRoutes(deps: ChatDeps) {
   const app = new Hono();
+  const metrics = deps.metrics ?? agentMetrics;
 
   app.post("/chat", async (c) => {
     let body: { message?: unknown; session_id?: unknown };
@@ -60,6 +64,7 @@ export function chatRoutes(deps: ChatDeps) {
             send({ type: "tool_call_start", name: event.toolName, args: event.args ?? {} });
             break;
           case "tool_execution_end":
+            metrics.incToolCall(event.toolName);
             send({
               type: "tool_call_end",
               name: event.toolName,
@@ -89,6 +94,8 @@ export function chatRoutes(deps: ChatDeps) {
         if (errMsg) {
           await send({ type: "error", message: errMsg });
         }
+        metrics.incChat();
+        metrics.addTokens(tokensIn, tokensOut);
         await send({ type: "done", tokens_in: tokensIn, tokens_out: tokensOut });
       } catch (err) {
         await send({ type: "error", message: err instanceof Error ? err.message : String(err) });

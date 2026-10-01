@@ -11,6 +11,8 @@ import { syncSkillPack } from "./skills/pack-sync.ts";
 import { shouldRunCurator, runCurator } from "./skills/curator.ts";
 import { getSnapshot } from "./memory/personal.ts";
 import { startResumeWatcher } from "./resume.ts";
+import { agentMetrics } from "./metrics.ts";
+import { resolveModelApiKey } from "./keyring.ts";
 
 export type AgentState = {
   status: "starting" | "active" | "degraded" | "suspended";
@@ -26,6 +28,8 @@ export type ChatConfig = {
   orgUrl: string;
   token: string;
   orgName?: string | null;
+  /** Model API key resolved at boot (keyring or env). */
+  apiKey?: string | null;
   streamFn?: StreamFn;
   fetch?: typeof fetch;
   skills?: SourcedSkill[];
@@ -49,6 +53,11 @@ export function createApp(state: AgentState, chat?: ChatConfig, skills?: Sourced
     });
   });
 
+  app.get("/metrics", (c) => {
+    c.header("content-type", "text/plain; version=0.0.4; charset=utf-8");
+    return c.body(agentMetrics.render());
+  });
+
   if (chat) {
     app.route("/", chatRoutes({ makeAgent: () => createAgent({ ...chat, skills }) }));
   }
@@ -68,6 +77,9 @@ export async function serve(env: Env) {
 
   let chat: ChatConfig | undefined;
   let skills: SourcedSkill[] = [];
+
+  const modelKey = await resolveModelApiKey(env);
+  console.log(`keyring: ${modelKey.source}`);
 
   try {
     const boot = await bootstrap(env);
@@ -107,6 +119,7 @@ export async function serve(env: Env) {
       orgUrl: boot.orgUrl,
       token: boot.token,
       orgName: config.org_name,
+      apiKey: modelKey.key,
     };
 
     startHeartbeat(

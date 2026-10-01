@@ -20,6 +20,9 @@ export type CreateAgentDeps = {
   orgUrl: string;
   token: string;
   orgName?: string | null;
+  /// Model API key, already resolved from the keyring or env. Falls back
+  /// to env.STAKA_MODEL_API_KEY when omitted (direct/test callers).
+  apiKey?: string | null;
   streamFn?: StreamFn;
   fetch?: typeof fetch;
   skills?: SourcedSkill[];
@@ -133,6 +136,6 @@ export function createAgent(deps: CreateAgentDeps): Agent {
     },
     convertToLlm,
     streamFn: deps.streamFn ?? streamSimple,
-    getApiKey: () => deps.env.STAKA_MODEL_API_KEY,
+    getApiKey: () => deps.apiKey ?? deps.env.STAKA_MODEL_API_KEY,
   });
 }
