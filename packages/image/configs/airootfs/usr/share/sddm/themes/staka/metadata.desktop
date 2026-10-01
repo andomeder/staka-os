@@ -1,0 +1,8 @@
+[General]
+[SddmGreeterTheme]
+Name=Staka
+Description=Staka login screen on the lock-screen gradient with brand-blue focus
+Author=Staka
+Type=sddm-theme
+Version=1.0
+QtVersion=6

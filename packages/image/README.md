@@ -20,6 +20,7 @@ See `NOTICE` and upstream `LICENSE`.
 | `configs/airootfs/root/staka-activate.sh` | HWID capture, enroll, poll, token write |
 | `configs/airootfs/root/helpers/` | Vendored installer UI helpers |
 | `branding/` | Installer ASCII logo + Plymouth theme assets |
+| `configs/airootfs/usr/share/sddm/themes/staka/` | SDDM login theme, installed to the target by `.automated_script.sh` |
 | `archiso/` | Arch releng profile checkout (not stored in git; clone at build time) |
 
 ## STAKA_MEDIA paths
