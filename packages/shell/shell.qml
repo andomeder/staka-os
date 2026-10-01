@@ -321,18 +321,22 @@ ShellRoot {
       required property var modelData
       readonly property string edgeName: String(modelData)
 
-      property var edgeConfig: shell.configForEdge(edgeBarDelegate.edgeName)
+      // Bar declares its own `shell` property, which shadows the ShellRoot id
+      // inside the Bar's bindings - route the root through this alias.
+      readonly property var shellRoot: shell
+
+      property var edgeConfig: shellRoot.configForEdge(edgeBarDelegate.edgeName)
 
       property Bar barItem: Bar {
-        stakaPath: shell.stakaPath
-        barWidgetRegistry: shell.barWidgetRegistry
+        stakaPath: edgeBarDelegate.shellRoot.stakaPath
+        barWidgetRegistry: edgeBarDelegate.shellRoot.barWidgetRegistry
         barConfig: edgeBarDelegate.edgeConfig
         position: edgeBarDelegate.edgeName
-        shell: shell
-        manifest: shell.barManifestFor(shell.defaultBarId)
+        shell: edgeBarDelegate.shellRoot
+        manifest: edgeBarDelegate.shellRoot.barManifestFor(edgeBarDelegate.shellRoot.defaultBarId)
 
-        Component.onCompleted: shell.registerBarInstance(edgeBarDelegate.edgeName, this)
-        Component.onDestruction: shell.unregisterBarInstance(edgeBarDelegate.edgeName)
+        Component.onCompleted: edgeBarDelegate.shellRoot.registerBarInstance(edgeBarDelegate.edgeName, this)
+        Component.onDestruction: edgeBarDelegate.shellRoot.unregisterBarInstance(edgeBarDelegate.edgeName)
       }
     }
   }
