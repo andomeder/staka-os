@@ -136,7 +136,8 @@ install_model_env() {
   fi
   local dropin_dir="$HOME/.config/systemd/user/staka-agent.service.d"
   mkdir -p "$dropin_dir"
-  { echo "[Service]"; sed 's/^/Environment=/' /opt/staka/demo.env; } > "$dropin_dir/staka-model.conf"
+  # Skip empty lines: a bare Environment= would clear the accumulated list.
+  grep -v '^[[:space:]]*$' /opt/staka/demo.env | sed 's/^/Environment=/' > "$dropin_dir/staka-model.conf"
   if [[ $(id -u) == "0" ]]; then
     chown -R "$(id -u "$TARGET_USER"):$(id -g "$TARGET_USER")" "$HOME/.config/systemd"
   fi
