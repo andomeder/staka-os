@@ -85,7 +85,7 @@ catch_errors() {
   gum style "If activation already succeeded, the enrollment code was consumed."
   gum style "While pending: admin reissues a code for the same user, then retry."
   gum style "If approved/active/revoked: HWID stays bound; revoke does not free it."
-  gum style "Log: ${OMARCHY_INSTALL_LOG_FILE:-/var/log/omarchy-install.log}"
+  gum style "Log: ${OMARCHY_INSTALL_LOG_FILE:-/var/log/staka-install.log}"
 
   # Offer options menu
   while true; do
