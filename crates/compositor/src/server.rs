@@ -49,6 +49,9 @@ pub struct ActiveSession {
     /// takes the apps with it, but explicit kills keep teardown
     /// deterministic.
     pub apps: Vec<Box<dyn ChildProcess>>,
+    /// The app command this session was created with, so suspend/resume
+    /// recovery can relaunch the same thing. `None` for a bare workspace.
+    pub app: Option<String>,
 }
 
 pub struct ServerState<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner, I: InputConnector> {
@@ -91,16 +94,7 @@ impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner, I: InputConnector>
     pub fn handle(&self, request: &Request) -> Handled {
         let id = request.id;
         match &request.command {
-            Command::Health {} => match self.hyprctl.health_check() {
-                Ok(()) => Handled {
-                    response: Response::ok_with(id, serde_json::json!({ "hyprland": true })),
-                    binary: None,
-                },
-                Err(e) => Handled {
-                    response: Response::err(id, e.to_string()),
-                    binary: None,
-                },
-            },
+            Command::Health {} => self.handle_health(id),
             Command::CreateWorkspace { app } => self.handle_create_workspace(id, app.as_deref()),
             Command::RunApp { app } => self.handle_run_app(id, app),
             Command::Screenshot { format } => self.handle_screenshot(id, *format),
@@ -121,6 +115,44 @@ impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner, I: InputConnector>
             Command::PressKeys { keys } => {
                 self.handle_input_command(id, "key", move |seat, _, _| seat.press_keys(keys))
             }
+        }
+    }
+
+    /// Health: Hyprland reachability plus a probe of the active session,
+    /// so a supervisor (the agent's resume watcher) can tell whether the
+    /// headless workspace survived a suspend. The probe is deliberately
+    /// cheap: process liveness and output presence, no screenshot.
+    fn handle_health(&self, id: u64) -> Handled {
+        if let Err(e) = self.hyprctl.health_check() {
+            return error(id, e);
+        }
+        let mut data = serde_json::json!({ "hyprland": true });
+        let mut session_guard = self.session.lock().unwrap();
+        if let Some(session) = session_guard.as_mut() {
+            // A cage that exited (killed by a resume race, OOM, or a
+            // compositor restart) is detectable without waiting: try_wait
+            // reaps only exited children.
+            let cage_alive = match session.cage.as_mut() {
+                Some(cage) => cage.is_running(),
+                None => false,
+            };
+            let output_present = self
+                .hyprctl
+                .list_outputs()
+                .map(|outputs| outputs.iter().any(|o| o.name == session.output))
+                .unwrap_or(false);
+            data["session"] = serde_json::json!({
+                "active": true,
+                "cage_alive": cage_alive,
+                "output_present": output_present,
+                "output": session.output,
+                "workspace": session.workspace,
+                "app": session.app,
+            });
+        }
+        Handled {
+            response: Response::ok_with(id, data),
+            binary: None,
         }
     }
 
@@ -203,6 +235,7 @@ impl<C: CommandRunner, S: ProcessSpawner, G: CaptureRunner, I: InputConnector>
             cage_height,
             input: None,
             apps: Vec::new(),
+            app: app.map(str::to_string),
         });
 
         let mut data = serde_json::json!({ "output": output, "workspace": workspace });
@@ -997,6 +1030,79 @@ mod tests {
             Response::ok_with(1, serde_json::json!({ "hyprland": true }))
         );
         assert!(handled.binary.is_none());
+    }
+
+    #[test]
+    fn health_reports_session_probe_with_live_cage() {
+        let mock = make_state();
+        let server = make_server(mock.clone());
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+
+        let _ = server.handle(&make_request(
+            1,
+            Command::CreateWorkspace {
+                app: Some("gnome-calculator".into()),
+            },
+        ));
+        let handled = server.handle(&make_request(2, Command::Health {}));
+        assert!(handled.response.ok);
+        let data = handled.response.data.unwrap();
+        let session = data["session"].as_object().unwrap();
+        assert_eq!(session["active"], serde_json::json!(true));
+        assert_eq!(session["cage_alive"], serde_json::json!(true));
+        assert_eq!(session["output_present"], serde_json::json!(true));
+        assert_eq!(session["output"], serde_json::json!("HEADLESS-2"));
+        assert_eq!(session["workspace"], serde_json::json!("staka-agent-1"));
+        assert_eq!(session["app"], serde_json::json!("gnome-calculator"));
+    }
+
+    #[test]
+    fn health_reports_a_dead_cage() {
+        // After a suspend/resume cycle the cage can be dead while its
+        // output still exists: the health probe must say so, without
+        // waiting on anything.
+        let mock = make_state();
+        let server = make_server(mock.clone());
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+
+        let _ = server.handle(&make_request(
+            1,
+            Command::CreateWorkspace {
+                app: Some("foot".into()),
+            },
+        ));
+        // Simulate the cage process exiting: the fake child reports exit
+        // as soon as it is signalled.
+        mock.spawned_processes.lock().unwrap()[0]
+            .signals_seen
+            .lock()
+            .unwrap()
+            .push(15);
+        let handled = server.handle(&make_request(2, Command::Health {}));
+        let data = handled.response.data.unwrap();
+        assert_eq!(data["session"]["cage_alive"], serde_json::json!(false));
+        assert_eq!(data["session"]["output_present"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn health_reports_a_missing_headless_output() {
+        // Hyprland can drop a headless output across a suspend; the probe
+        // must catch that too.
+        let mock = make_state();
+        let server = make_server(mock.clone());
+        std::env::set_var("WAYLAND_DISPLAY", "wayland-1");
+
+        let _ = server.handle(&make_request(
+            1,
+            Command::CreateWorkspace {
+                app: Some("foot".into()),
+            },
+        ));
+        mock.monitors.lock().unwrap().retain(|n| n != "HEADLESS-2");
+        let handled = server.handle(&make_request(2, Command::Health {}));
+        let data = handled.response.data.unwrap();
+        assert_eq!(data["session"]["cage_alive"], serde_json::json!(true));
+        assert_eq!(data["session"]["output_present"], serde_json::json!(false));
     }
 
     #[test]

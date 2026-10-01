@@ -10,6 +10,7 @@ import { ensureOrgSkillSymlink } from "./skills/symlink.ts";
 import { syncSkillPack } from "./skills/pack-sync.ts";
 import { shouldRunCurator, runCurator } from "./skills/curator.ts";
 import { getSnapshot } from "./memory/personal.ts";
+import { startResumeWatcher } from "./resume.ts";
 
 export type AgentState = {
   status: "starting" | "active" | "degraded" | "suspended";
@@ -128,6 +129,10 @@ export async function serve(env: Env) {
 
   const app = createApp(state, chat, skills);
 
+  const resumeWatcher = startResumeWatcher({
+    log: (message) => console.log(message),
+  });
+
   const server = Bun.serve({
     hostname: env.STAKA_AGENT_HOST,
     port: env.STAKA_AGENT_PORT,
@@ -135,4 +140,6 @@ export async function serve(env: Env) {
   });
 
   console.log(`staka-agent listening on ${server.hostname}:${server.port} (status: ${state.status}, skills: ${skills.length})`);
+
+  return () => resumeWatcher.stop();
 }

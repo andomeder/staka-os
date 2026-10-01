@@ -259,6 +259,13 @@ impl CageSession {
         })
     }
 
+    /// Cheap liveness probe: true while the cage process has not exited.
+    /// Reaps the child once it has exited, so a later terminate() is a
+    /// no-op.
+    pub fn is_running(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+
     /// Terminates cage: SIGTERM, a grace window, then SIGKILL, and removes
     /// the socket file if cage left it behind. A cage that already exited
     /// still resolves to `Ok`.
