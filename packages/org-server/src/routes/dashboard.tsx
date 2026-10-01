@@ -62,7 +62,14 @@ import {
   NewUserPage,
   StaleMachinesPage,
   UsersPage,
+  themeFromCookie,
 } from "../views/pages.tsx";
+import {
+  csvDocument,
+  letterheadPdf,
+  type PdfSection,
+} from "../lib/exports.ts";
+import { getReportsSummary } from "../lib/reports.ts";
 
 const ADMIN_COOKIE = "staka_admin";
 const CSRF_COOKIE = "csrf";
@@ -125,10 +132,19 @@ export function dashboardRoutes(deps: DashboardDeps) {
     return { ok: true, body: flat };
   }
 
+  const themeCookie = (c: Parameters<typeof setCookie>[0]): string | undefined =>
+    c.req.header("cookie");
+
   app.get("/admin/login", (c) => {
     const csrf = mintCsrf(c);
     const error = sanitizeFlash(c.req.query("error"));
-    return c.html(<LoginPage csrf={csrf} {...(error ? { error } : {})} />);
+    return c.html(
+      <LoginPage
+        csrf={csrf}
+        theme={themeFromCookie(themeCookie(c))}
+        {...(error ? { error } : {})}
+      />,
+    );
   });
 
   app.post("/admin/login", async (c) => {
@@ -201,17 +217,21 @@ export function dashboardRoutes(deps: DashboardDeps) {
   authed.get("/", async (c) => {
     const auth = c.get("adminAuth");
     const csrf = mintCsrf(c);
+    const theme = themeFromCookie(themeCookie(c));
     const flash =
       deps.flashes.take(auth.jti)?.message ??
       sanitizeFlash(c.req.query("flash"));
     const machineRows = await listMachines(deps.dbApp);
     const userRows = await listUsers(deps.dbApp);
     const byId = new Map(userRows.map((u) => [u.id, u]));
+    const summary = await getReportsSummary(deps.dbApp);
 
     return c.html(
       <MachinesPage
         employeeId={auth.employeeId}
         csrf={csrf}
+        theme={theme}
+        summary={summary}
         {...(flash ? { flash } : {})}
         machines={machineRows.map((m) => {
           const u = byId.get(m.userId);
@@ -235,6 +255,7 @@ export function dashboardRoutes(deps: DashboardDeps) {
     const id = c.req.param("id");
     if (!isUuid(id)) return c.notFound();
     const csrf = mintCsrf(c);
+    const theme = themeFromCookie(themeCookie(c));
     const taken = deps.flashes.take(auth.jti);
     const flash = taken?.message ?? sanitizeFlash(c.req.query("flash"));
     const nonce = taken?.nonce;
@@ -268,6 +289,7 @@ export function dashboardRoutes(deps: DashboardDeps) {
       <MachineDetailPage
         employeeId={auth.employeeId}
         csrf={csrf}
+        theme={theme}
         {...(flash ? { flash } : {})}
         {...(nonce ? { nonce } : {})}
         {...(hwidJson ? { hwidJson } : {})}
@@ -418,6 +440,7 @@ export function dashboardRoutes(deps: DashboardDeps) {
   authed.get("/users", async (c) => {
     const auth = c.get("adminAuth");
     const csrf = mintCsrf(c);
+    const theme = themeFromCookie(themeCookie(c));
     const flash =
       deps.flashes.take(auth.jti)?.message ??
       sanitizeFlash(c.req.query("flash"));
@@ -426,6 +449,7 @@ export function dashboardRoutes(deps: DashboardDeps) {
       <UsersPage
         employeeId={auth.employeeId}
         csrf={csrf}
+        theme={theme}
         {...(flash ? { flash } : {})}
         users={rows.map((u) => ({
           id: u.id,
@@ -441,6 +465,7 @@ export function dashboardRoutes(deps: DashboardDeps) {
   authed.get("/users/new", async (c) => {
     const auth = c.get("adminAuth");
     const csrf = mintCsrf(c);
+    const theme = themeFromCookie(themeCookie(c));
     const error =
       deps.flashes.take(auth.jti)?.message ??
       sanitizeFlash(c.req.query("error"));
@@ -448,6 +473,7 @@ export function dashboardRoutes(deps: DashboardDeps) {
       <NewUserPage
         employeeId={auth.employeeId}
         csrf={csrf}
+        theme={theme}
         {...(error ? { error } : {})}
       />,
     );
@@ -526,6 +552,7 @@ export function dashboardRoutes(deps: DashboardDeps) {
   authed.get("/codes", async (c) => {
     const auth = c.get("adminAuth");
     const csrf = mintCsrf(c);
+    const theme = themeFromCookie(themeCookie(c));
     const taken = deps.flashes.take(auth.jti);
     const flash = taken?.message ?? sanitizeFlash(c.req.query("flash"));
     const createdCode = taken?.code;
@@ -537,6 +564,7 @@ export function dashboardRoutes(deps: DashboardDeps) {
       <CodesPage
         employeeId={auth.employeeId}
         csrf={csrf}
+        theme={theme}
         {...(flash ? { flash } : {})}
         {...(createdCode ? { createdCode } : {})}
         users={userRows.map((u) => ({
@@ -643,6 +671,7 @@ export function dashboardRoutes(deps: DashboardDeps) {
   authed.get("/reports/stale", async (c) => {
     const auth = c.get("adminAuth");
     const csrf = mintCsrf(c);
+    const theme = themeFromCookie(themeCookie(c));
     const flash =
       deps.flashes.take(auth.jti)?.message ??
       sanitizeFlash(c.req.query("flash"));
@@ -654,6 +683,7 @@ export function dashboardRoutes(deps: DashboardDeps) {
       <StaleMachinesPage
         employeeId={auth.employeeId}
         csrf={csrf}
+        theme={theme}
         {...(flash ? { flash } : {})}
         machines={staleRows.map((m) => {
           const u = byId.get(m.userId);
@@ -685,6 +715,7 @@ export function dashboardRoutes(deps: DashboardDeps) {
   authed.get("/kb", async (c) => {
     const auth = c.get("adminAuth");
     const csrf = mintCsrf(c);
+    const theme = themeFromCookie(themeCookie(c));
     const flash =
       deps.flashes.take(auth.jti)?.message ??
       sanitizeFlash(c.req.query("flash"));
@@ -697,6 +728,8 @@ export function dashboardRoutes(deps: DashboardDeps) {
       <KbPage
         employeeId={auth.employeeId}
         csrf={csrf}
+        theme={theme}
+        kbEnabled={Boolean(kbIngestDeps())}
         {...(flash ? { flash } : {})}
         stats={stats}
         documents={rows.map((d) => ({
@@ -827,6 +860,148 @@ export function dashboardRoutes(deps: DashboardDeps) {
       deps.flashes.set(auth.jti, { message: "kb_unavailable" });
     }
     return c.redirect("/admin/kb");
+  });
+
+  const csvStamp = () => new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+
+  authed.get("/machines.csv", async (c) => {
+    const auth = c.get("adminAuth");
+    const rows = await listMachines(deps.dbApp);
+    const userRows = await listUsers(deps.dbApp);
+    const byId = new Map(userRows.map((u) => [u.id, u]));
+    const csv = csvDocument(
+      [
+        "hostname",
+        "status",
+        "user",
+        "hwid_display",
+        "provision_flow",
+        "first_seen_at",
+        "approved_at",
+        "last_heartbeat_at",
+      ],
+      rows.map((m) => {
+        const u = byId.get(m.userId);
+        return [
+          m.hostname,
+          m.status,
+          u ? `${u.displayName} (${u.employeeId})` : m.userId,
+          m.hwidDisplay,
+          m.provisionFlow,
+          m.firstSeenAt.toISOString(),
+          m.approvedAt?.toISOString() ?? "",
+          m.lastHeartbeatAt?.toISOString() ?? "",
+        ];
+      }),
+    );
+    await appendAudit(deps.dbApp, {
+      actorUserId: auth.userId,
+      action: "report.export",
+      targetType: "machine",
+      targetId: auth.userId,
+      payload: { via: "dashboard", export: "machines_csv", rows: rows.length },
+    });
+    return c.body(csv, 200, {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": `attachment; filename="staka-machines-${csvStamp()}.csv"`,
+      "cache-control": "no-store",
+    });
+  });
+
+  authed.get("/reports/stale.csv", async (c) => {
+    const auth = c.get("adminAuth");
+    const staleRows = await listStaleMachines(deps.dbApp);
+    const userRows = await listUsers(deps.dbApp);
+    const byId = new Map(userRows.map((u) => [u.id, u]));
+    const csv = csvDocument(
+      ["hostname", "user", "hwid_display", "last_heartbeat_at", "first_seen_at"],
+      staleRows.map((m) => {
+        const u = byId.get(m.userId);
+        return [
+          m.hostname,
+          u ? `${u.displayName} (${u.employeeId})` : m.userId,
+          m.hwidDisplay,
+          m.lastHeartbeatAt?.toISOString() ?? "",
+          m.firstSeenAt.toISOString(),
+        ];
+      }),
+    );
+    await appendAudit(deps.dbApp, {
+      actorUserId: auth.userId,
+      action: "report.export",
+      targetType: "machine",
+      targetId: auth.userId,
+      payload: { via: "dashboard", export: "stale_csv", rows: staleRows.length },
+    });
+    return c.body(csv, 200, {
+      "content-type": "text/csv; charset=utf-8",
+      "content-disposition": `attachment; filename="staka-stale-machines-${csvStamp()}.csv"`,
+      "cache-control": "no-store",
+    });
+  });
+
+  authed.get("/reports/summary.pdf", async (c) => {
+    const auth = c.get("adminAuth");
+    const summary = await getReportsSummary(deps.dbApp);
+    const machineRows = await listMachines(deps.dbApp);
+    const userRows = await listUsers(deps.dbApp);
+    const byId = new Map(userRows.map((u) => [u.id, u]));
+    const stale = machineRows.filter((m) => m.status === "active" && (!m.lastHeartbeatAt || Date.now() - m.lastHeartbeatAt.getTime() > 24 * 60 * 60 * 1000));
+    const counts = summary.machines_by_status;
+
+    const sections: PdfSection[] = [
+      {
+        heading: "Fleet summary",
+        lines: [
+          { text: `Total machines: ${machineRows.length}`, bold: true },
+          { text: `Active: ${counts.active ?? 0}    Pending: ${counts.pending ?? 0}    Suspended: ${counts.suspended ?? 0}    Revoked: ${counts.revoked ?? 0}` },
+          { text: `Activations in the last 24 hours: ${summary.recent_activations}` },
+          { text: `Stale machines (no heartbeat in 24h): ${summary.stale_machines}` },
+        ],
+      },
+      {
+        heading: "Machines needing attention",
+        table: {
+          header: ["Hostname", "Status", "User", "Last heartbeat"],
+          rows: stale.length
+            ? stale.map((m) => {
+                const u = byId.get(m.userId);
+                return [
+                  m.hostname,
+                  m.status,
+                  u ? `${u.displayName} (${u.employeeId})` : m.userId,
+                  m.lastHeartbeatAt?.toISOString() ?? "never",
+                ];
+              })
+            : [["None", "-", "-", "-"]],
+        },
+      },
+    ];
+
+    const pdfBytes = await letterheadPdf({
+      orgName: "Staka",
+      title: "Fleet status report",
+      subtitle: "Machine inventory and health snapshot from the Staka admin console.",
+      generatedBy: auth.employeeId,
+      generatedAt: new Date().toISOString(),
+      sections,
+    });
+    await appendAudit(deps.dbApp, {
+      actorUserId: auth.userId,
+      action: "report.export",
+      targetType: "report",
+      targetId: auth.userId,
+      payload: { via: "dashboard", export: "summary_pdf" },
+    });
+    return c.body(
+      pdfBytes as unknown as string,
+      200,
+      {
+        "content-type": "application/pdf",
+        "content-disposition": `attachment; filename="staka-fleet-report-${csvStamp()}.pdf"`,
+        "cache-control": "no-store",
+      },
+    );
   });
 
   app.route("/admin", authed);
