@@ -162,10 +162,10 @@ Rectangle {
 
         TextInput {
           id: password
-          width: field.width - 36
+          width: field.width - 36 - (revealMouse.containsMouse || revealOn ? 26 : 0)
           height: field.height
           verticalAlignment: TextInput.AlignVCenter
-          echoMode: TextInput.Password
+          echoMode: revealOn ? TextInput.Normal : TextInput.Password
           font.family: "JetBrainsMono Nerd Font"
           font.pixelSize: 16
           font.letterSpacing: 3
@@ -193,6 +193,26 @@ Rectangle {
               root.tryLogin()
               event.accepted = true
             }
+          }
+        }
+
+        // Password reveal toggle (eye)
+        Text {
+          id: revealIcon
+          property bool revealOn: false
+          anchors.verticalCenter: parent.verticalCenter
+          text: revealOn ? "\uea7a" : "\uea75"
+          font.family: "JetBrainsMono Nerd Font"
+          font.pixelSize: 16
+          color: revealMouse.containsMouse ? root.brandBlue : root.textDim
+          opacity: password.text.length > 0 || revealMouse.containsMouse ? 1 : 0.35
+
+          MouseArea {
+            id: revealMouse
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: revealIcon.revealOn = !revealIcon.revealOn
           }
         }
       }
