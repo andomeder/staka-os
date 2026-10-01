@@ -10,6 +10,9 @@ export type ChatDeps = {
   metrics?: AgentMetrics;
 };
 
+/** Rejects oversized prompts before they reach the model. */
+export const MAX_MESSAGE_CHARS = 24_000;
+
 function summarizeResult(result: unknown): string {
   try {
     const content = (result as { content?: { type: string; text?: string }[] } | null)?.content;
@@ -40,6 +43,9 @@ export function chatRoutes(deps: ChatDeps) {
     const message = typeof body.message === "string" ? body.message.trim() : "";
     if (!message) {
       return c.json({ error: "invalid_body" }, 400);
+    }
+    if (message.length > MAX_MESSAGE_CHARS) {
+      return c.json({ error: "message_too_long", max_chars: MAX_MESSAGE_CHARS }, 413);
     }
 
     const agent = deps.makeAgent();

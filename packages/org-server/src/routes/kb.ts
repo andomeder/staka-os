@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { z } from "zod";
 import type { Db } from "../db/client.ts";
 import { usageLogs } from "../db/schema.ts";
@@ -13,6 +13,7 @@ import {
 import type { JwtKeyring } from "../lib/jwt.ts";
 import { err } from "../lib/http.ts";
 import { MachineStatusCache } from "../lib/machine-status-cache.ts";
+import { RateLimiter } from "../lib/rate-limit.ts";
 import { machineBearerAuth } from "../middleware/machine-auth.ts";
 
 export type KbRoutesDeps = {
@@ -22,6 +23,8 @@ export type KbRoutesDeps = {
   statusCache?: MachineStatusCache;
   /** Cap for full document text returned to agents. */
   maxDocumentChars?: number;
+  /** Per-machine request limiter; a default is created when omitted. */
+  limiter?: RateLimiter;
 };
 
 const searchSchema = z.object({
@@ -56,6 +59,9 @@ function extractProfileFacts(content: string): ProfileFacts {
   };
 }
 
+/** Machine-scoped requests can fan out to the retrieval engine; cap them. */
+const KB_REQUESTS_PER_MINUTE = 60;
+
 export function kbRoutes(deps: KbRoutesDeps) {
   const app = new Hono();
   const auth = machineBearerAuth({
@@ -63,8 +69,22 @@ export function kbRoutes(deps: KbRoutesDeps) {
     keyring: deps.keyring,
     statusCache: deps.statusCache,
   });
+  const limiter = deps.limiter ?? new RateLimiter(KB_REQUESTS_PER_MINUTE, 60_000);
+
+  function limited(c: Context): Response | null {
+    const machineId = c.get("machineAuth").machineId;
+    const hit = limiter.hit(`machine:${machineId}`);
+    if (hit.ok) return null;
+    return c.json(
+      { error: "rate_limited", retry_after_sec: hit.retryAfterSec, request_id: c.get("requestId") },
+      429,
+      { "retry-after": String(hit.retryAfterSec) },
+    );
+  }
 
   app.post("/v1/kb/search", auth, async (c) => {
+    const limitedRes = limited(c);
+    if (limitedRes) return limitedRes;
     if (!deps.kb) return err(c, 503, "kb_unavailable");
     const machineId = c.get("machineAuth").machineId;
 
@@ -107,6 +127,8 @@ export function kbRoutes(deps: KbRoutesDeps) {
   });
 
   app.post("/v1/kb/who-knows", auth, async (c) => {
+    const limitedRes = limited(c);
+    if (limitedRes) return limitedRes;
     if (!deps.kb) return err(c, 503, "kb_unavailable");
     const machineId = c.get("machineAuth").machineId;
 
@@ -211,6 +233,8 @@ export function kbRoutes(deps: KbRoutesDeps) {
   });
 
   app.get("/v1/kb/documents/:documentId", auth, async (c) => {
+    const limitedRes = limited(c);
+    if (limitedRes) return limitedRes;
     if (!deps.kb) return err(c, 503, "kb_unavailable");
     const machineId = c.get("machineAuth").machineId;
     const documentId = c.req.param("documentId");
