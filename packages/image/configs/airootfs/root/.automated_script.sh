@@ -88,7 +88,7 @@ install_staka_agent() {
 
   # Run as ROOT: the fresh user has no sudo configured yet, and the setup
   # script maps users itself via STAKA_SETUP_USER.
-  chroot_root_bash /root/staka-agent-setup.sh
+  chroot_root_bash env STAKA_SETUP_USER="$OMARCHY_USER" /root/staka-agent-setup.sh
   rm -f /mnt/root/staka-agent-setup.sh
 }
 
