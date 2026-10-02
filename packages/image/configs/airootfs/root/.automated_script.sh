@@ -33,6 +33,13 @@ install_arch() {
   install_base_system > >(sed -u 's/\x1b\[[0-9;]*[a-zA-Z]//g' >>/var/log/omarchy-install.log) 2>&1
   unset CURRENT_SCRIPT
   stop_log_output
+
+  # The omarchy installer runs as the install user inside the chroot with
+  # sudo calls; a fresh archinstall user only has password sudo, which cannot
+  # answer a prompt mid-install and halts the run. Stage a temporary
+  # NOPASSWD sudoer - omarchy-first-run removes it after the first boot.
+  echo "$OMARCHY_USER ALL=(ALL:ALL) NOPASSWD: ALL" > /mnt/etc/sudoers.d/first-run
+  chmod 440 /mnt/etc/sudoers.d/first-run
 }
 
 install_omarchy() {
@@ -46,7 +53,8 @@ install_omarchy() {
 
 brand_desktop() {
   # Replace the default omarchy wallpaper with the Staka brand wallpaper and
-  # drop the Staka icon into the user's branding dir.
+  # drop the Staka icon into the user's branding dir. Boot branding is
+  # guarded so an omarchy-branded boot can never halt the install.
   gum style --foreground 3 --padding "1 0 1 $PADDING_LEFT" "Applying Staka branding..."
   if [[ -d /root/branding ]]; then
     mkdir -p /mnt/home/$OMARCHY_USER/.local/share/backgrounds
@@ -72,6 +80,15 @@ brand_desktop() {
     # Staka mark so terminals greet with Staka branding.
     mkdir -p /mnt/home/$OMARCHY_USER/.config/omarchy/branding
     cp /root/branding/logo.txt /mnt/home/$OMARCHY_USER/.config/omarchy/branding/about.txt
+    # Boot branding: limine entry names and the plymouth splash carry the
+    # omarchy mark on a stock install; swap both for the Staka ones.
+    sed -i 's/Omarchy Bootloader/Staka Bootloader/; s/Omarchy/Staka/g' /mnt/boot/limine.conf 2>/dev/null || true
+    sed -i 's/TARGET_OS_NAME="Omarchy"/TARGET_OS_NAME="Staka"/' /mnt/etc/default/limine 2>/dev/null || true
+    if [[ -d /root/branding/plymouth ]]; then
+      mkdir -p /mnt/usr/share/plymouth/themes/staka
+      cp -r /root/branding/plymouth/. /mnt/usr/share/plymouth/themes/staka/
+      arch-chroot /mnt/ plymouth-set-default-theme -R staka || true
+    fi
   fi
 }
 

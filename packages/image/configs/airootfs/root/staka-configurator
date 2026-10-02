@@ -393,14 +393,15 @@ confirm_disk_overwrite() {
 
     case $confirm_status in
       0)
-        [[ $mode == "encrypted" ]] && encrypt_installation=true || encrypt_installation=false
+        encrypt_installation=false
         return 0
         ;;
       1)
         return 1
         ;;
       130)
-        [[ $mode == "encrypted" ]] && mode="unencrypted" || mode="encrypted"
+        # Ctrl+C must never silently flip this install to encrypted; redraw.
+        continue
         ;;
       *)
         abort
