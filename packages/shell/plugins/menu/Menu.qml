@@ -10,7 +10,9 @@ Item {
   id: root
 
   // Injected by staka-shell when this plugin is summoned.
-  property string stakaPath: Quickshell.env("STAKA_PATH")
+  // STAKA_SHELL_PATH is the fallback so a manually started shell (no Hyprland
+  // env line) still finds the shipped menu data.
+  property string stakaPath: Quickshell.env("STAKA_PATH") || Quickshell.env("STAKA_SHELL_PATH")
 
   // Plugin lifecycle hooks. The host calls open(payloadJson) after
   // `staka-shell shell summon staka.menu ...` and close() when hidden.

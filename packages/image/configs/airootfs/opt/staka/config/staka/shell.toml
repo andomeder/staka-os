@@ -1,0 +1,13 @@
+# Staka brand surfaces - the ink navy and brand blue from the rd-m0 band mock.
+
+[color]
+background = "#0B1220"
+foreground = "#D7E3F8"
+accent = "#1E5EFF"
+muted = "#5A6C92"
+
+[bar]
+background = "#0D1730"
+background-alpha = 1.0
+text = "#D7E3F8"
+active = "#1E5EFF"

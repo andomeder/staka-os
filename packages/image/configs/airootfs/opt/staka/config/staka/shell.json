@@ -16,33 +16,36 @@
           "id": "staka.menu"
         },
         {
-          "id": "staka.ai-panel"
-        },
-        {
           "id": "staka.workspaces"
         },
         {
-          "id": "staka.inline-lyrics"
+          "id": "staka.active-window"
         }
       ],
       "center": [
         {
           "id": "staka.clock",
-          "format": "dddd HH:mm"
-        },
-        {
-          "id": "staka.weather"
+          "format": "ddd d MMM HH:mm"
         }
       ],
       "right": [
         {
-          "id": "staka.hw-monitor"
+          "id": "staka.sysmon"
         },
         {
           "id": "staka.tray"
         },
         {
+          "id": "staka.network"
+        },
+        {
+          "id": "staka.power"
+        },
+        {
           "id": "staka.audio"
+        },
+        {
+          "id": "staka.ai-panel"
         }
       ]
     },
@@ -58,7 +61,7 @@
   },
   "bar": {
     "position": "top",
-    "thickness": 44,
+    "thickness": 32,
     "transparent": false,
     "centerAnchor": "staka.clock",
     "layout": {
@@ -67,36 +70,58 @@
           "id": "staka.menu"
         },
         {
-          "id": "staka.ai-panel"
-        },
-        {
           "id": "staka.workspaces"
         },
         {
-          "id": "staka.inline-lyrics"
+          "id": "staka.active-window"
         }
       ],
       "center": [
         {
           "id": "staka.clock",
-          "format": "dddd HH:mm"
-        },
-        {
-          "id": "staka.weather"
+          "format": "ddd d MMM HH:mm"
         }
       ],
       "right": [
         {
-          "id": "staka.hw-monitor"
+          "id": "staka.sysmon"
         },
         {
           "id": "staka.tray"
         },
         {
+          "id": "staka.network"
+        },
+        {
+          "id": "staka.power"
+        },
+        {
           "id": "staka.audio"
+        },
+        {
+          "id": "staka.ai-panel"
         }
       ]
-    }
+    },
+    "left": [
+      {
+        "id": "staka.menu"
+      },
+      {
+        "id": "staka.workspaces"
+      },
+      {
+        "id": "staka.active-window"
+      }
+    ],
+    "right": [
+      {
+        "id": "staka.tray"
+      },
+      {
+        "id": "staka.ai-panel"
+      }
+    ]
   },
   "idle": {
     "screensaver": 150,

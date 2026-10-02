@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "staka.sysmon",
+  "name": "System Monitor",
+  "version": "1.0.0",
+  "author": "Staka",
+  "description": "CPU and memory readout chip for the band bar.",
+  "kinds": ["bar-widget"],
+  "entryPoints": { "barWidget": "SysMon.qml" }
+}

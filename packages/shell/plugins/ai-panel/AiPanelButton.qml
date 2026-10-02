@@ -21,7 +21,7 @@ BarWidget {
 
   readonly property color dotColor: {
     if (root.isPanelOpen) return "#3B7BFF"
-    if (agent.healthStatus === "ok") return "#22c55e"
+    if (agent.healthStatus === "ok" || agent.healthStatus === "active") return "#22c55e"
     if (agent.healthStatus === "unreachable" || agent.healthStatus === "unknown") return "#f59e0b"
     return Color.urgent
   }
@@ -44,8 +44,8 @@ BarWidget {
     Rectangle {
       anchors.fill: parent
       radius: Style.cornerRadius > 0 ? Math.min(Style.cornerRadius, height / 2) : height / 2
-      color: root.isPanelOpen ? Qt.rgba(0.12, 0.37, 1.0, 0.25) : (mouseArea.containsMouse ? Qt.rgba(1, 1, 1, 0.08) : "transparent")
-      border.color: root.isPanelOpen ? "#1E5EFF" : (mouseArea.containsMouse ? Qt.rgba(0.12, 0.37, 1.0, 0.4) : "transparent")
+      color: root.isPanelOpen ? "#3B7BFF" : "#1E5EFF"
+      border.color: root.isPanelOpen ? "#5A9BFF" : "#1E5EFF"
       border.width: 1
 
       Behavior on color { ColorAnimation { duration: 150 } }
@@ -59,20 +59,22 @@ BarWidget {
 
       Text {
         anchors.verticalCenter: parent.verticalCenter
-        text: "\u2728"
-        color: root.isPanelOpen ? "#3B7BFF" : (root.bar ? root.bar.barForeground : Color.foreground)
+        text: "+"
+        color: "#FFFFFF"
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
         font.pixelSize: Style.font.bodySmall
+        font.bold: true
         renderType: Text.NativeRendering
       }
 
       Text {
         anchors.verticalCenter: parent.verticalCenter
-        text: "AI"
+        text: "AGENT"
         font.bold: true
+        font.letterSpacing: 1
         font.family: root.bar ? root.bar.fontFamily : Style.font.family
         font.pixelSize: Style.font.caption
-        color: root.isPanelOpen ? "#3B7BFF" : (root.bar ? root.bar.barForeground : Color.foreground)
+        color: "#FFFFFF"
         visible: !root.bar || !root.bar.vertical
       }
 
