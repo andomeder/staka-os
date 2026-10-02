@@ -44,6 +44,23 @@ install_omarchy() {
   gum style --foreground 2 --padding "0 0 1 $PADDING_LEFT" "Desktop configured."
 }
 
+brand_desktop() {
+  # Replace the default omarchy wallpaper with the Staka brand wallpaper and
+  # drop the Staka icon into the user's branding dir.
+  gum style --foreground 3 --padding "1 0 1 $PADDING_LEFT" "Applying Staka branding..."
+  if [[ -d /root/branding ]]; then
+    mkdir -p /mnt/home/$OMARCHY_USER/.local/share/backgrounds
+    cp /root/branding/wallpaper.png /mnt/home/$OMARCHY_USER/.local/share/backgrounds/staka-wallpaper.png
+    chown $OMARCHY_USER:$OMARCHY_USER /mnt/home/$OMARCHY_USER/.local/share/backgrounds/staka-wallpaper.png
+    # Point omarchy's current-background symlink chain at the Staka wallpaper
+    mkdir -p /mnt/home/$OMARCHY_USER/.config/omarchy/current
+    ln -sf /home/$OMARCHY_USER/.local/share/backgrounds/staka-wallpaper.png /mnt/home/$OMARCHY_USER/.config/omarchy/current/background
+    chown -R $OMARCHY_USER:$OMARCHY_USER /mnt/home/$OMARCHY_USER/.config/omarchy
+    # Mask omarchy's first-boot popups (Update System / Learn Keybindings)
+    arch-chroot /mnt/ systemctl --global mask omarchy-first-boot.service 2>/dev/null || true
+  fi
+}
+
 install_staka_agent() {
   gum style --foreground 3 --padding "1 0 1 $PADDING_LEFT" "Installing Staka agent and shell..."
   # Stage ISO agent artifacts onto the target root so the chroot setup
@@ -60,7 +77,9 @@ install_staka_agent() {
   cp /root/staka-agent-setup.sh /mnt/root/staka-agent-setup.sh
   chmod +x /mnt/root/staka-agent-setup.sh
 
-  chroot_bash env STAKA_SETUP_USER="$OMARCHY_USER" /root/staka-agent-setup.sh
+  # Run as ROOT: the fresh user has no sudo configured yet, and the setup
+  # script maps users itself via STAKA_SETUP_USER.
+  chroot_root_bash /root/staka-agent-setup.sh
   rm -f /mnt/root/staka-agent-setup.sh
 }
 
@@ -333,11 +352,20 @@ chroot_bash() {
     /bin/bash "$@"
 }
 
+chroot_root_bash() {
+  arch-chroot /mnt/ \
+    env OMARCHY_MIRROR="$OMARCHY_MIRROR" \
+    USER="root" \
+    HOME="/root" \
+    /bin/bash "$@"
+}
+
 if [[ $(tty) == "/dev/tty1" ]]; then
   use_omarchy_helpers
   run_configurator
   install_arch
   install_omarchy
+  brand_desktop
   install_staka_agent
   install_staka_sddm_theme
 

@@ -373,7 +373,7 @@ disk_form() {
 disk_form
 
 confirm_disk_overwrite() {
-  local mode="encrypted"
+  local mode="unencrypted"
   local affirmative confirm_status
 
   while true; do
@@ -382,10 +382,9 @@ confirm_disk_overwrite() {
     gum style "Everything will be overwritten. There is no recovery possible."
 
     if [[ $mode == "encrypted" ]]; then
-      gum style --foreground 8 "Press Ctrl+C for unencrypted install."
-      affirmative="Yes, install"
+      affirmative="Yes, install (encrypted)"
     else
-      affirmative="Yes, install without encryption"
+      affirmative="Yes, install"
     fi
 
     echo
