@@ -6,5 +6,6 @@
   "author": "Staka",
   "description": "CPU and memory readout chip for the band bar.",
   "kinds": ["bar-widget"],
+  "keepLoaded": true,
   "entryPoints": { "barWidget": "SysMon.qml" }
 }

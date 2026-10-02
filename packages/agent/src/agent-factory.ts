@@ -5,6 +5,7 @@ import type { Model } from "@earendil-works/pi-ai";
 import type { Env } from "./env.ts";
 import { createOrgTools } from "./tools/org.ts";
 import { createKbTools } from "./tools/kb.ts";
+import { createBashTool } from "./tools/bash.ts";
 import { createSkillsTools } from "./tools/skills.ts";
 import { createSkillManageTool } from "./tools/skill-manage.ts";
 import { createMemoryTool } from "./tools/memory.ts";
@@ -116,9 +117,11 @@ export function createAgent(deps: CreateAgentDeps): Agent {
     token: deps.token,
     fetch: deps.fetch,
   });
+  const bashTools = createBashTool();
   const tools = [
     ...orgTools,
     ...kbTools,
+    ...bashTools,
     ...skillsTools,
     skillManageTool,
     memoryTool,
