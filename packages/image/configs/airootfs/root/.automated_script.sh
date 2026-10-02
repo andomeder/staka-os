@@ -67,6 +67,11 @@ brand_desktop() {
     mkdir -p /mnt/home/$OMARCHY_USER/.local/state/staka/current
     ln -sf /home/$OMARCHY_USER/.local/share/backgrounds/staka-wallpaper.png /mnt/home/$OMARCHY_USER/.local/state/staka/current/background
     chown -R $OMARCHY_USER:$OMARCHY_USER /mnt/home/$OMARCHY_USER/.local/state
+    # fastfetch: omarchy's config points its logo at
+    # ~/.config/omarchy/branding/about.txt - overwrite the art with the
+    # Staka mark so terminals greet with Staka branding.
+    mkdir -p /mnt/home/$OMARCHY_USER/.config/omarchy/branding
+    cp /root/branding/logo.txt /mnt/home/$OMARCHY_USER/.config/omarchy/branding/about.txt
   fi
 }
 
