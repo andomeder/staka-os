@@ -50,7 +50,7 @@ export function createApp(state: AgentState, chat?: ChatConfig, skills?: Sourced
   });
 
   if (chat) {
-    app.route("/", chatRoutes({ makeAgent: () => createAgent({ ...chat, skills }) }));
+    app.route("/", chatRoutes({ makeAgent: (history) => createAgent({ ...chat, skills, history }) }));
   }
 
   return app;

@@ -36,10 +36,58 @@ Item {
   AgentClient { id: agent }
 
   ListModel { id: messages }
+  // Saved conversations: { id, title, turnsJson }. The active transcript is
+  // the messages model; switching stores and restores between the two.
+  ListModel { id: sessions }
+
+  function ensureSession() {
+    if (root.sessionId.length === 0) {
+      root.sessionId = "qs-" + Date.now().toString(36)
+      sessions.append({ sid: root.sessionId, title: "New chat", turnsJson: "[]" })
+    }
+  }
+
+  function transcriptTurns() {
+    var turns = []
+    for (var i = 0; i < messages.count; i++) {
+      var m = messages.get(i)
+      if ((m.kind === "user" || m.kind === "assistant") && m.content.length > 0)
+        turns.push({ role: m.kind, content: m.content })
+    }
+    return turns
+  }
+
+  function saveSession() {
+    for (var i = 0; i < sessions.count; i++) {
+      if (sessions.get(i).sid === root.sessionId) {
+        sessions.setProperty(i, "turnsJson", JSON.stringify(transcriptTurns()))
+        return
+      }
+    }
+  }
+
+  function switchSession(index) {
+    if (index < 0 || index >= sessions.count) return
+    saveSession()
+    var s = sessions.get(index)
+    root.sessionId = s.sid
+    messages.clear()
+    var turns = JSON.parse(s.turnsJson)
+    for (var i = 0; i < turns.length; i++)
+      messages.append({ kind: turns[i].role, content: turns[i].content, toolName: "" })
+    scrollToEnd()
+  }
+
+  function newSession() {
+    saveSession()
+    root.sessionId = "qs-" + Date.now().toString(36)
+    sessions.append({ sid: root.sessionId, title: "New chat", turnsJson: "[]" })
+    messages.clear()
+    Qt.callLater(function() { input.forceActiveFocus() })
+  }
 
   function open(payloadJson) {
-    if (root.sessionId.length === 0)
-      root.sessionId = "qs-" + Date.now().toString(36)
+    ensureSession()
     root.opened = true
     Qt.callLater(function() { input.forceActiveFocus() })
   }
@@ -113,18 +161,31 @@ Item {
   function sendCurrent() {
     var text = input.text.trim()
     if (text.length === 0) return
+    ensureSession()
     input.text = ""
+    var history = transcriptTurns()
     appendUser(text)
+    // Title a fresh session from its first message.
+    if (messages.count === 1) {
+      for (var i = 0; i < sessions.count; i++) {
+        if (sessions.get(i).sid === root.sessionId) {
+          var t = text.length > 38 ? text.slice(0, 38) + "\u2026" : text
+          sessions.setProperty(i, "title", t)
+          break
+        }
+      }
+    }
     // A leading "/name" is an explicit skill invocation; the agent resolves
-    // it. We pass it through verbatim as the message.
+    // it. We pass it through verbatim as the message, with the session's
+    // prior turns replayed as context.
     agent.chat(text, root.sessionId, function(ev) {
       if (!ev || !ev.type) return
       if (ev.type === "text_delta") appendDelta(ev.content || "")
       else if (ev.type === "tool_call_start") appendToolStart(ev.name || "tool")
       else if (ev.type === "tool_call_end") appendToolEnd(ev.name || "tool", ev.result_summary || "")
       else if (ev.type === "error") appendError(ev.message || "agent error")
-      // "done" carries usage stats; nothing to render in the MVP.
-    })
+      else if (ev.type === "done") saveSession()
+    }, history)
   }
 
   // --- window --------------------------------------------------------------
@@ -177,13 +238,21 @@ Item {
         anchors.leftMargin: card.contentLeftInset
         spacing: root.contentSpacing
 
-        // Header
+        // Header: agent dot + org identity + skills line (slide 9 design).
         RowLayout {
           Layout.fillWidth: true
           spacing: 8
 
+          Rectangle {
+            width: 9
+            height: 9
+            radius: 5
+            Layout.alignment: Qt.AlignVCenter
+            color: agent.healthy ? "#22c55e" : "#f59e0b"
+          }
+
           Text {
-            text: "Staka AI"
+            text: agent.orgName.length > 0 ? agent.orgName : "Staka AI"
             color: root.foreground
             font.family: root.fontFamily
             font.pixelSize: Style.font.heading
@@ -193,10 +262,29 @@ Item {
           Item { Layout.fillWidth: true }
 
           Text {
-            text: agent.orgName.length > 0 ? agent.orgName : "no org"
+            text: agent.skillsCount + " skills - " + (agent.healthy ? "agent active" : "agent offline")
             color: Qt.darker(root.foreground, 1.6)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
+          }
+
+          WidgetButton {
+            text: "+"
+            fontFamily: root.fontFamily
+            foreground: root.foreground
+            horizontalMargin: 4
+            tooltipText: "New chat"
+            onPressed: function(mouse) { root.newSession() }
+          }
+
+          WidgetButton {
+            id: sessionsButton
+            text: "\u25BE"
+            fontFamily: root.fontFamily
+            foreground: root.foreground
+            horizontalMargin: 4
+            tooltipText: "Switch chat"
+            onPressed: function(mouse) { sessionsMenu.popup() }
           }
 
           WidgetButton {
@@ -206,6 +294,31 @@ Item {
             horizontalMargin: 4
             tooltipText: "Close"
             onPressed: function(mouse) { root.dismiss() }
+          }
+        }
+
+        Menu {
+          id: sessionsMenu
+          width: 280
+
+          Instantiator {
+            model: sessions
+            delegate: MenuItem {
+              required property string sid
+              required property string title
+              text: title
+              highlighted: sid === root.sessionId
+              onTriggered: {
+                for (var i = 0; i < sessions.count; i++) {
+                  if (sessions.get(i).sid === sid) {
+                    root.switchSession(i)
+                    break
+                  }
+                }
+              }
+            }
+            onObjectAdded: (index, object) => sessionsMenu.insertItem(index, object)
+            onObjectRemoved: (index, object) => sessionsMenu.removeItem(object)
           }
         }
 
@@ -234,54 +347,101 @@ Item {
 
             delegate: Item {
               width: ListView.view.width
-              height: bubble.implicitHeight
+              height: contentCol.implicitHeight
 
-              BorderSurface {
-                id: bubble
-                width: parent.width
-                radius: Style.cornerRadius
-                color: {
-                  if (model.kind === "user") return Color.launcher.selectedBackground
-                  if (model.kind === "tool") return Qt.darker(root.background, 1.15)
-                  if (model.kind === "error") return Qt.darker(Color.urgent, 1.4)
-                  return root.background
-                }
-                borderSpec: Border.surfaceSpec("ai-bubble", "border", Qt.darker(root.border, 1.2), 1)
-                padding: 8
+              // One metrics helper per delegate instance for bubble sizing.
+              TextMetrics {
+                id: userMetrics
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                text: model.content
+              }
 
-                Column {
-                  anchors.fill: parent
-                  anchors.topMargin: bubble.contentTopInset
-                  anchors.rightMargin: bubble.contentRightInset
-                  anchors.bottomMargin: bubble.contentBottomInset
-                  anchors.leftMargin: bubble.contentLeftInset
-                  spacing: 2
+              Column {
+                id: contentCol
+                anchors.left: parent.left
+                anchors.right: parent.right
+                spacing: 0
 
-                  Text {
-                    visible: model.kind !== "tool"
-                    text: model.kind === "user" ? "You" : model.kind === "error" ? "Error" : "Staka AI"
-                    color: model.kind === "user" ? Qt.darker(root.foreground, 1.4) : root.border
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                    font.bold: true
-                  }
+                // User message: brand-blue bubble, right-aligned (slide 9).
+                Rectangle {
+                  visible: model.kind === "user"
+                  anchors.right: parent.right
+                  anchors.rightMargin: 2
+                  width: Math.min(parent.width - 16, userMetrics.width + 28)
+                  height: userText.implicitHeight + 18
+                  radius: 14
+                  color: "#1E5EFF"
 
                   Text {
-                    visible: model.kind === "tool"
-                    text: "\u2699 " + model.toolName
-                    color: Qt.darker(root.foreground, 1.5)
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.caption
-                  }
-
-                  Text {
-                    width: parent.width
+                    id: userText
+                    x: 14
+                    y: 9
+                    width: parent.width - 28
                     text: model.content
-                    color: model.kind === "error" ? Color.urgent : root.foreground
+                    color: "#FFFFFF"
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
                     wrapMode: Text.Wrap
-                    textFormat: model.kind === "error" ? Text.PlainText : Text.MarkdownText
+                    textFormat: Text.PlainText
+                  }
+                }
+
+                // Assistant reply: plain markdown on the panel surface.
+                Text {
+                  visible: model.kind === "assistant"
+                  width: parent.width
+                  text: model.content
+                  color: root.foreground
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.body
+                  wrapMode: Text.Wrap
+                  textFormat: Text.MarkdownText
+                }
+
+                // Tool call: monospace chip with the call and its summary.
+                Rectangle {
+                  visible: model.kind === "tool"
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  height: toolText.implicitHeight + 12
+                  radius: 8
+                  color: Qt.darker(root.background, 1.2)
+                  border.color: root.border
+                  border.width: 1
+
+                  Text {
+                    id: toolText
+                    x: 10
+                    y: 6
+                    width: parent.width - 20
+                    text: "\u2699 " + model.toolName + (model.content !== "running\u2026" ? "  \u00b7  " + model.content : "")
+                    color: Qt.darker(root.foreground, 1.4)
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                  }
+                }
+
+                // Error: urgent chip.
+                Rectangle {
+                  visible: model.kind === "error"
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  height: errorText.implicitHeight + 12
+                  radius: 8
+                  color: Qt.darker(Color.urgent, 1.5)
+
+                  Text {
+                    id: errorText
+                    x: 10
+                    y: 6
+                    width: parent.width - 20
+                    text: model.content
+                    color: "#FFD9D0"
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.caption
+                    wrapMode: Text.Wrap
                   }
                 }
               }

@@ -55,7 +55,7 @@ QtObject {
           root.skillsCount = body.skills_count || 0
           root.memoryEntries = body.memory_entries || 0
           root.healthStatus = body.status || "ok"
-          root.healthy = root.healthStatus === "ok"
+          root.healthy = root.healthStatus === "ok" || root.healthStatus === "active"
         } catch (e) {
           root.healthy = false
           root.healthStatus = "unknown"
@@ -72,7 +72,7 @@ QtObject {
   // The agent speaks SSE: blocks of "data: <json>" lines separated by a
   // blank line. We parse responseText incrementally as it arrives so text
   // deltas render live, buffering any partial trailing line.
-  function chat(message, sessionId, onEvent) {
+  function chat(message, sessionId, onEvent, history) {
     var xhr = new XMLHttpRequest()
     xhr.open("POST", baseUrl + "/chat")
     xhr.setRequestHeader("Content-Type", "application/json")
@@ -127,6 +127,7 @@ QtObject {
 
     var body = { message: message }
     if (sessionId) body.session_id = sessionId
+    if (history && history.length > 0) body.history = history
     xhr.send(JSON.stringify(body))
   }
 

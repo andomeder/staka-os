@@ -80,6 +80,11 @@ brand_desktop() {
     # Staka mark so terminals greet with Staka branding.
     mkdir -p /mnt/home/$OMARCHY_USER/.config/omarchy/branding
     cp /root/branding/logo.txt /mnt/home/$OMARCHY_USER/.config/omarchy/branding/about.txt
+    # Staka surface palette: the shell reads brand colors from this theme
+    # directory; without it the built-in fallback palette renders the bar.
+    mkdir -p /mnt/home/$OMARCHY_USER/.local/state/staka/current/theme
+    cp /opt/staka/config/staka/shell.toml /mnt/home/$OMARCHY_USER/.local/state/staka/current/theme/shell.toml
+    chown -R $OMARCHY_USER:$OMARCHY_USER /mnt/home/$OMARCHY_USER/.local/state
     # Boot branding: limine entry names and the plymouth splash carry the
     # omarchy mark on a stock install; swap both for the Staka ones.
     sed -i 's/Omarchy Bootloader/Staka Bootloader/; s/Omarchy/Staka/g' /mnt/boot/limine.conf 2>/dev/null || true
