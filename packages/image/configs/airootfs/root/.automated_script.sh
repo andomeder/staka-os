@@ -80,6 +80,15 @@ brand_desktop() {
     # Staka mark so terminals greet with Staka branding.
     mkdir -p /mnt/home/$OMARCHY_USER/.config/omarchy/branding
     cp /root/branding/logo.txt /mnt/home/$OMARCHY_USER/.config/omarchy/branding/about.txt
+    # fastfetch software lines: show the Staka identity instead of the
+    # omarchy version, branch, and channel.
+    FF_CONF=/mnt/home/$OMARCHY_USER/.config/fastfetch/config.jsonc
+    if [[ -f $FF_CONF ]]; then
+      sed -i 's|version=$(omarchy-version); echo "Omarchy $version"|echo "Staka"|' "$FF_CONF"
+      sed -i 's|branch=$(omarchy-version-branch); echo "$branch"|echo "main"|' "$FF_CONF"
+      sed -i 's|channel=$(omarchy-version-channel); echo "$channel"|echo "andomeder/staka-os"|' "$FF_CONF"
+      chown $OMARCHY_USER:$OMARCHY_USER "$FF_CONF"
+    fi
     # Staka surface palette: the shell reads brand colors from this theme
     # directory; without it the built-in fallback palette renders the bar.
     mkdir -p /mnt/home/$OMARCHY_USER/.local/state/staka/current/theme
