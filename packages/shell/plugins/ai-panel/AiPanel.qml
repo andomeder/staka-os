@@ -261,13 +261,6 @@ Item {
 
           Item { Layout.fillWidth: true }
 
-          Text {
-            text: agent.skillsCount + " skills - " + (agent.healthy ? "agent active" : "agent offline")
-            color: Qt.darker(root.foreground, 1.6)
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-          }
-
           WidgetButton {
             text: "+"
             fontFamily: root.fontFamily
@@ -349,35 +342,27 @@ Item {
               width: ListView.view.width
               height: contentCol.implicitHeight
 
-              // One metrics helper per delegate instance for bubble sizing.
-              TextMetrics {
-                id: userMetrics
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                text: model.content
-              }
-
               Column {
                 id: contentCol
                 anchors.left: parent.left
                 anchors.right: parent.right
-                spacing: 0
+                spacing: 12
 
                 // User message: brand-blue bubble, right-aligned (slide 9).
                 Rectangle {
                   visible: model.kind === "user"
                   anchors.right: parent.right
                   anchors.rightMargin: 2
-                  width: Math.min(parent.width - 16, userMetrics.width + 28)
-                  height: userText.implicitHeight + 18
+                  width: Math.max(64, Math.min(parent.width * 0.75, model.content.length * 9 + 30))
+                  height: userText.implicitHeight + 20
                   radius: 14
                   color: "#1E5EFF"
 
                   Text {
                     id: userText
-                    x: 14
-                    y: 9
+                    anchors.centerIn: parent
                     width: parent.width - 28
+                    horizontalAlignment: Text.AlignLeft
                     text: model.content
                     color: "#FFFFFF"
                     font.family: root.fontFamily
@@ -490,7 +475,7 @@ Item {
             font.pixelSize: Style.font.bodySmall
           }
           Text {
-            text: agent.healthStatus
+            text: agent.healthStatus + " - " + agent.skillsCount + " skills"
             color: Qt.darker(root.foreground, 1.6)
             font.family: root.fontFamily
             font.pixelSize: Style.font.caption
