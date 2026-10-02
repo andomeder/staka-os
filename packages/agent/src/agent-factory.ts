@@ -1,4 +1,4 @@
-import { Agent, convertToLlm, type StreamFn } from "@earendil-works/pi-agent-core";
+import { Agent, convertToLlm, type AgentMessage, type StreamFn } from "@earendil-works/pi-agent-core";
 import { getBuiltinModel, getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import { streamSimple } from "@earendil-works/pi-ai/compat";
 import type { Model } from "@earendil-works/pi-ai";
@@ -24,6 +24,8 @@ export type CreateAgentDeps = {
   fetch?: typeof fetch;
   skills?: SourcedSkill[];
   sessionId?: string;
+  /** Prior conversation turns replayed as context for this session. */
+  history?: AgentMessage[];
 };
 
 const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
@@ -130,6 +132,7 @@ export function createAgent(deps: CreateAgentDeps): Agent {
       systemPrompt: buildSystemPrompt(deps.orgName, skills),
       model: resolveModel(deps.env),
       tools,
+      ...(deps.history && deps.history.length > 0 ? { messages: deps.history } : {}),
     },
     convertToLlm,
     streamFn: deps.streamFn ?? streamSimple,
