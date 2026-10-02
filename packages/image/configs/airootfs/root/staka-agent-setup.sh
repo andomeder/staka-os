@@ -92,6 +92,12 @@ hl.on("hyprland.start", function()
   hl.exec_cmd("sleep 2 && $HOME/.local/bin/staka-band apply")
 end)
 hyprland.bind("SUPER", "A", "exec", "$HOME/.local/bin/staka-toggle-panel")
+
+-- Staka launcher and menu replace the walker binds
+hyprland.unbind("SUPER", "SPACE")
+hyprland.unbind("SUPER ALT", "SPACE")
+hyprland.bind("SUPER", "SPACE", "exec", "$HOME/.local/bin/staka-shell shell toggle staka.launcher")
+hyprland.bind("SUPER ALT", "SPACE", "exec", "$HOME/.local/bin/staka-shell shell toggle staka.menu")
 EOF
     fi
     echo "wired staka shell into hyprland lua config"
@@ -102,6 +108,11 @@ EOF
       echo "env = STAKA_PATH,$HOME/.local/share/staka"
       echo "env = STAKA_SHELL_PATH,$HOME/.local/share/staka"
       echo "bind = SUPER, A, exec, env STAKA_SHELL_PATH=$HOME/.local/share/staka $HOME/.local/bin/staka-toggle-panel"
+      echo "# Staka launcher and menu replace the walker binds"
+      echo "unbind = SUPER, Space"
+      echo "unbind = SUPER ALT, Space"
+      echo "bind = SUPER, Space, exec, $HOME/.local/bin/staka-shell shell toggle staka.launcher"
+      echo "bind = SUPER ALT, Space, exec, $HOME/.local/bin/staka-shell shell toggle staka.menu"
       echo "exec-once = quickshell -p $HOME/.local/share/staka/shell"
     } >> "$HYPRLAND_CONF"
     echo "wired staka shell into hyprland config"
@@ -164,8 +175,13 @@ install_model_env() {
   fi
   local dropin_dir="$HOME/.config/systemd/user/staka-agent.service.d"
   mkdir -p "$dropin_dir"
-  # Skip empty lines: a bare Environment= would clear the accumulated list.
-  grep -v '^[[:space:]]*$' /opt/staka/demo.env | sed 's/^/Environment=/' > "$dropin_dir/staka-model.conf"
+  # Lines before any section header are rejected as "assignment outside of
+  # section", so the [Service] header must lead the drop-in.
+  {
+    echo "[Service]"
+    # Skip empty lines: a bare Environment= would clear the accumulated list.
+    grep -v '^[[:space:]]*$' /opt/staka/demo.env | sed 's/^/Environment=/'
+  } > "$dropin_dir/staka-model.conf"
   if [[ $(id -u) == "0" ]]; then
     chown -R "$(id -u "$TARGET_USER"):$(id -g "$TARGET_USER")" "$HOME/.config/systemd"
   fi
