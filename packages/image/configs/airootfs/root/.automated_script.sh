@@ -58,6 +58,15 @@ brand_desktop() {
     chown -R $OMARCHY_USER:$OMARCHY_USER /mnt/home/$OMARCHY_USER/.config/omarchy
     # Mask omarchy's first-boot popups (Update System / Learn Keybindings)
     arch-chroot /mnt/ systemctl --global mask omarchy-first-boot.service 2>/dev/null || true
+    # Suppress omarchy's waybar and first-run popups through omarchy's own
+    # toggle flag and first-run marker; the Staka shell replaces both.
+    mkdir -p /mnt/home/$OMARCHY_USER/.local/state/omarchy/toggles
+    touch /mnt/home/$OMARCHY_USER/.local/state/omarchy/toggles/waybar-off
+    rm -f /mnt/home/$OMARCHY_USER/.local/state/omarchy/first-run.mode
+    # The Staka shell background plugin resolves its wallpaper from here.
+    mkdir -p /mnt/home/$OMARCHY_USER/.local/state/staka/current
+    ln -sf /home/$OMARCHY_USER/.local/share/backgrounds/staka-wallpaper.png /mnt/home/$OMARCHY_USER/.local/state/staka/current/background
+    chown -R $OMARCHY_USER:$OMARCHY_USER /mnt/home/$OMARCHY_USER/.local/state
   fi
 }
 
