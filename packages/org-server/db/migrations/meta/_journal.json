@@ -43,6 +43,13 @@
       "when": 1790032439827,
       "tag": "0005_skill_packs",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1791361174394,
+      "tag": "0006_agent_event_types",
+      "breakpoints": true
     }
   ]
 }
