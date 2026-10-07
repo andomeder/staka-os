@@ -12,6 +12,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
 use std::process::exit;
+use std::sync::Arc;
 use std::thread;
 
 use staka_compositor::server::{serve_connection, ServerState};
@@ -52,10 +53,12 @@ fn main() {
     };
     eprintln!("staka-compositor listening on {}", socket_path.display());
 
+    let state = Arc::new(ServerState::system());
+
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
-                let state = ServerState::system();
+                let state = state.clone();
                 thread::spawn(move || {
                     if let Err(e) = serve_connection(&mut stream, &state) {
                         eprintln!("connection error: {}", e);

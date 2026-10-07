@@ -8,8 +8,11 @@ set -euo pipefail
 
 AGENT_BIN_SRC="/opt/staka/agent/staka-agent"
 AGENT_UNIT_SRC="/opt/staka/agent/staka-agent.service"
+COMPOSITOR_BIN_SRC="/opt/staka/agent/staka-compositor"
+COMPOSITOR_UNIT_SRC="/opt/staka/agent/staka-compositor.service"
+CAGE_BIN_SRC="/opt/staka/agent/cage"
 SHELL_SRC="/opt/staka/shell"
-SKILLS_SRC="/opt/staka/skills"
+SKILLS_SRC="/opt/staka/skills" 
 
 # Support running as root (no user sudo required in the chroot) or as the
 # install user. STAKA_SETUP_USER must name the desktop user either way.
@@ -34,6 +37,25 @@ install_agent_binary() {
   fi
   $SUDO install "${INSTALL_USER_FLAGS[@]}" -m 755 "$AGENT_BIN_SRC" /usr/local/bin/staka-agent
   echo "installed staka-agent binary"
+}
+
+install_compositor_binary() {
+  if [[ -f "$COMPOSITOR_BIN_SRC" ]]; then
+    $SUDO install "${INSTALL_USER_FLAGS[@]}" -m 755 "$COMPOSITOR_BIN_SRC" /usr/local/bin/staka-compositor
+    echo "installed staka-compositor binary"
+  fi
+  if [[ -f "$CAGE_BIN_SRC" ]]; then
+    $SUDO install "${INSTALL_USER_FLAGS[@]}" -m 755 "$CAGE_BIN_SRC" /usr/local/bin/cage
+    echo "installed cage binary"
+  fi
+}
+
+install_compositor_unit() {
+  if [[ ! -f "$COMPOSITOR_UNIT_SRC" ]]; then
+    return 0
+  fi
+  $SUDO install -Dm 644 "$COMPOSITOR_UNIT_SRC" /usr/lib/systemd/user/staka-compositor.service
+  echo "installed staka-compositor systemd user unit"
 }
 
 install_agent_unit() {
@@ -140,6 +162,16 @@ install_skills() {
   echo "linked org skill pack"
 }
 
+enable_compositor() {
+  if [[ ! -f /usr/lib/systemd/user/staka-compositor.service ]]; then
+    return 0
+  fi
+  mkdir -p "$(getent passwd "$TARGET_USER" | cut -d: -f6)/.config/systemd/user/graphical-session.target.wants"
+  ln -sf /usr/lib/systemd/user/staka-compositor.service \
+    "$(getent passwd "$TARGET_USER" | cut -d: -f6)/.config/systemd/user/graphical-session.target.wants/staka-compositor.service"
+  echo "enabled staka-compositor for graphical session"
+}
+
 enable_agent() {
   if [[ ! -f /etc/staka/machine.token ]]; then
     echo "no machine token; agent unit not enabled" >&2
@@ -218,10 +250,13 @@ apply_demo_org_url() {
 }
 
 install_agent_binary
+install_compositor_binary
 install_agent_unit
+install_compositor_unit
 install_shell
 install_skills
 enable_agent
+enable_compositor
 fix_token_permissions
 apply_demo_org_url
 install_model_env

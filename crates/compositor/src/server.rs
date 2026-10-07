@@ -1720,5 +1720,86 @@ mod tests {
         drop(client);
         server_thread.join().unwrap();
     }
-}
 
+    #[test]
+    fn serve_connection_preserves_session_across_separate_connections() {
+        let server_state = make_server(make_state());
+
+        // Connection 1: create_workspace
+        let (mut client1, mut server1) = UnixStream::pair().unwrap();
+        let state1 = &server_state;
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                serve_connection(&mut server1, state1).unwrap();
+            });
+            client1
+                .write_all(
+                    &crate::ipc::encode_request(&make_request(
+                        1,
+                        Command::CreateWorkspace { app: None },
+                    ))
+                    .unwrap()
+                    .encode(),
+                )
+                .unwrap();
+            let frame = read_frame(&mut client1).unwrap().unwrap();
+            assert_eq!(frame.frame_type, FRAME_TYPE_JSON);
+            let resp = parse_response(&frame.payload).unwrap();
+            assert_eq!(resp.id, 1);
+            assert!(resp.ok);
+            drop(client1);
+        });
+
+        // Connection 2: screenshot
+        let (mut client2, mut server2) = UnixStream::pair().unwrap();
+        let state2 = &server_state;
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                serve_connection(&mut server2, state2).unwrap();
+            });
+            client2
+                .write_all(
+                    &crate::ipc::encode_request(&make_request(
+                        2,
+                        Command::Screenshot {
+                            format: ImageFormat::Png,
+                        },
+                    ))
+                    .unwrap()
+                    .encode(),
+                )
+                .unwrap();
+            let frame = read_frame(&mut client2).unwrap().unwrap();
+            assert_eq!(frame.frame_type, FRAME_TYPE_JSON);
+            let resp = parse_response(&frame.payload).unwrap();
+            assert_eq!(resp.id, 2);
+            assert!(resp.ok);
+            let frame = read_frame(&mut client2).unwrap().unwrap();
+            assert_eq!(frame.frame_type, crate::ipc::FRAME_TYPE_BINARY);
+            assert!(crate::screencopy::is_png(&frame.payload));
+            drop(client2);
+        });
+
+        // Connection 3: teardown
+        let (mut client3, mut server3) = UnixStream::pair().unwrap();
+        let state3 = &server_state;
+        std::thread::scope(|s| {
+            s.spawn(|| {
+                serve_connection(&mut server3, state3).unwrap();
+            });
+            client3
+                .write_all(
+                    &crate::ipc::encode_request(&make_request(3, Command::Teardown {}))
+                        .unwrap()
+                        .encode(),
+                )
+                .unwrap();
+            let frame = read_frame(&mut client3).unwrap().unwrap();
+            assert_eq!(frame.frame_type, FRAME_TYPE_JSON);
+            let resp = parse_response(&frame.payload).unwrap();
+            assert_eq!(resp.id, 3);
+            assert!(resp.ok);
+            drop(client3);
+        });
+    }
+}
