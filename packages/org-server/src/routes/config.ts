@@ -1,6 +1,11 @@
 import { Hono } from "hono";
-import { eq } from "drizzle-orm";
-import type { ConfigResponse, MachineMeResponse } from "@staka/protocol";
+import { desc, eq, ilike, or } from "drizzle-orm";
+import type {
+  ConfigResponse,
+  MachineMeResponse,
+  UsageLogsResponse,
+  UsersSearchResponse,
+} from "@staka/protocol";
 import type { Db } from "../db/client.ts";
 import { machines, usageLogs, users } from "../db/schema.ts";
 import type { JwtKeyring } from "../lib/jwt.ts";
@@ -112,6 +117,107 @@ export function configRoutes(deps: ConfigDeps) {
     };
 
     return c.json(body);
+  });
+
+  // Org directory search for machine-bound agents: non-PII profile fields
+  // only, matched on employee id, display name, or email prefix.
+  app.get("/v1/users/search", auth, async (c) => {
+    const query = (c.req.query("q") ?? "").trim();
+    const limitRaw = Number.parseInt(c.req.query("limit") ?? "20", 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 20;
+
+    if (query.length === 0) {
+      const body: UsersSearchResponse = { query, count: 0, users: [] };
+      return c.json(body);
+    }
+
+    const pattern = `%${query}%`;
+    const rows = await deps.dbApp
+      .select({
+        employeeId: users.employeeId,
+        displayName: users.displayName,
+        email: users.email,
+        role: users.role,
+        status: users.status,
+      })
+      .from(users)
+      .where(
+        or(
+          ilike(users.employeeId, pattern),
+          ilike(users.displayName, pattern),
+          ilike(users.email, pattern),
+        ),
+      )
+      .orderBy(users.employeeId)
+      .limit(limit);
+
+    const body: UsersSearchResponse = {
+      query,
+      count: rows.length,
+      users: rows,
+    };
+    return c.json(body);
+  });
+
+  // Recent usage-log entries for the calling machine, newest first.
+  app.get("/v1/usage-logs", auth, async (c) => {
+    const { machineId } = c.get("machineAuth");
+    const limitRaw = Number.parseInt(c.req.query("limit") ?? "50", 10);
+    const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 200) : 50;
+
+    const rows = await deps.dbApp
+      .select({
+        id: usageLogs.id,
+        eventType: usageLogs.eventType,
+        payload: usageLogs.payload,
+        createdAt: usageLogs.createdAt,
+      })
+      .from(usageLogs)
+      .where(eq(usageLogs.machineId, machineId))
+      .orderBy(desc(usageLogs.createdAt))
+      .limit(limit);
+
+    const body: UsageLogsResponse = {
+      machine_id: machineId,
+      count: rows.length,
+      logs: rows.map((r) => ({
+        id: r.id,
+        event_type: r.eventType,
+        payload: r.payload as Record<string, unknown>,
+        created_at: r.createdAt.toISOString(),
+      })),
+    };
+    return c.json(body);
+  });
+
+  // Record one agent activity event for the calling machine.
+  app.post("/v1/usage-logs", auth, async (c) => {
+    const { machineId } = c.get("machineAuth");
+    const raw = await c.req.json().catch(() => null);
+    const eventType = (raw as { event_type?: unknown } | null)?.event_type;
+    const allowed = ["agent_action", "agent_error", "skill_invoked"];
+    if (typeof eventType !== "string" || !allowed.includes(eventType)) {
+      return c.json(
+        { error: "invalid_event_type", request_id: c.get("requestId") },
+        400,
+      );
+    }
+    const detail = (raw as { detail?: unknown }).detail;
+    const payload =
+      typeof detail === "string" && detail.length > 0
+        ? { detail: detail.slice(0, 1000) }
+        : {};
+
+    const inserted = await deps.dbApp
+      .insert(usageLogs)
+      .values({ machineId, eventType, payload })
+      .returning({ id: usageLogs.id, createdAt: usageLogs.createdAt });
+
+    return c.json({
+      ok: true,
+      id: inserted[0]?.id ?? null,
+      created_at: inserted[0]?.createdAt.toISOString() ?? null,
+    });
   });
 
   return app;
