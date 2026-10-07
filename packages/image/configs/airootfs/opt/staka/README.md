@@ -10,6 +10,9 @@ Expected layout:
       agent/
         staka-agent           compiled agent binary (bun build --compile)
         staka-agent.service   systemd user unit
+        staka-compositor      compiled headless compositor driver (cargo build --release)
+        staka-compositor.service systemd user unit
+        cage                  compiled cage kiosk compositor with virtual input
       shell/                  QuickShell fork (packages/shell/ tree)
         bin/staka-shell
         bin/staka-toggle-panel
