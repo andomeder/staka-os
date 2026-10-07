@@ -77,3 +77,38 @@ export const AgentEvent = z.discriminatedUnion("type", [
 ]);
 
 export type AgentEvent = z.infer<typeof AgentEvent>;
+
+export const OrgUserSummary = z.object({
+  employee_id: z.string(),
+  display_name: z.string(),
+  email: z.string().nullable(),
+  role: z.string(),
+  status: z.string(),
+});
+
+export type OrgUserSummary = z.infer<typeof OrgUserSummary>;
+
+export const UsersSearchResponse = z.object({
+  query: z.string(),
+  count: z.number().int(),
+  users: z.array(OrgUserSummary),
+});
+
+export type UsersSearchResponse = z.infer<typeof UsersSearchResponse>;
+
+export const UsageLogEntry = z.object({
+  id: z.union([z.number(), z.string()]),
+  event_type: z.string(),
+  payload: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+});
+
+export type UsageLogEntry = z.infer<typeof UsageLogEntry>;
+
+export const UsageLogsResponse = z.object({
+  machine_id: z.string().uuid(),
+  count: z.number().int(),
+  logs: z.array(UsageLogEntry),
+});
+
+export type UsageLogsResponse = z.infer<typeof UsageLogsResponse>;
