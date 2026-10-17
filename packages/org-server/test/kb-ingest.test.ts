@@ -158,16 +158,42 @@ describe("KB ingestion", () => {
 
   test("directory sync ingests a profile per active user", async () => {
     const deps = ingestDeps();
+    const empActive = `EMP-SYNC-${crypto.randomUUID().slice(0, 8)}`;
+    const empInvited = `EMP-SYNC-${crypto.randomUUID().slice(0, 8)}`;
+    await deps.db.insert(users).values([
+      {
+        employeeId: empActive,
+        displayName: "Sync Staff",
+        role: "staff",
+        status: "active",
+        email: "sync.staff@example.com",
+      },
+      {
+        employeeId: empInvited,
+        displayName: "Invited Staff",
+        role: "staff",
+        status: "invited",
+      },
+    ]);
+    const [active] = await deps.db
+      .select()
+      .from(users)
+      .where(eq(users.employeeId, empActive));
+    const [invited] = await deps.db
+      .select()
+      .from(users)
+      .where(eq(users.employeeId, empInvited));
+
     const count = await syncDirectoryProfiles(deps);
-    expect(count).toBeGreaterThan(0);
-    const seeded = await deps.db.select().from(users).limit(1);
-    const profile = engine.docs.get(`profile:${seeded[0]!.employeeId}`);
+    expect(count).toBe(1);
+    const profile = engine.docs.get(`profile:${active!.employeeId}`);
     expect(profile?.metadata.doc_type).toBe("profile");
     expect(profile?.metadata.org_id).toBe("alpha");
-    expect(profile?.content).toContain(`employee_id: ${seeded[0]!.employeeId}`);
+    expect(profile?.content).toContain(`employee_id: ${active!.employeeId}`);
+    expect(engine.docs.has(`profile:${invited!.employeeId}`)).toBe(false);
     // employee_id is the who_knows key; email stays in the org DB, and the
     // profile doc carries it only when set.
-    expect(profileDocument({ ...seeded[0]!, email: null })).not.toContain("email:");
+    expect(profileDocument({ ...active!, email: null })).not.toContain("email:");
   });
 
   test("re-ingesting the same customId updates instead of duplicating", async () => {

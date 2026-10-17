@@ -50,6 +50,9 @@ export const usageEventTypeEnum = pgEnum("usage_event_type", [
   "kb_search",
   "kb_read",
   "kb_who_knows",
+  "agent_action",
+  "agent_error",
+  "skill_invoked",
 ]);
 
 const ts = (name: string) =>
