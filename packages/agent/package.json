@@ -14,7 +14,7 @@
     "@earendil-works/pi-agent-core": "^0.80.10",
     "@earendil-works/pi-ai": "^0.80.10",
     "@staka/protocol": "workspace:*",
-    "hono": "4.12.27",
+    "hono": "4.13.13",
     "jose": "6.2.3",
     "typebox": "1.1.38",
     "zod": "4.4.3"
